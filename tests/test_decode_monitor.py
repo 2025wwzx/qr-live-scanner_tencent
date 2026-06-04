@@ -112,8 +112,12 @@ async def test_decode_only_monitor_samples_frames_without_confirming_login() -> 
     assert summary.candidates_seen == 2
     assert summary.duplicate_candidates == 1
     assert summary.last_backend == "mock"
+    assert summary.last_candidate_summary == "二维码候选（内容已隐藏）"
+    assert "same" not in str(summary.last_candidate_summary)
+    assert "new" not in str(summary.last_candidate_summary)
     assert not hasattr(summary, "payload")
     assert snapshots[-1].candidates_seen == 2
+    assert snapshots[-1].last_candidate_summary == "二维码候选（内容已隐藏）"
     assert not hasattr(snapshots[-1], "payload")
 
 

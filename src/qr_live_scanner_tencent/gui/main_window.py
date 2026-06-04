@@ -24,12 +24,14 @@ from PySide6.QtWidgets import (
 )
 
 from qr_live_scanner_tencent.accounts import KeyringAccountStore, TencentSession
+from qr_live_scanner_tencent.auth.tencent import TencentGameConfig, default_game_configs
 from qr_live_scanner_tencent.gui.about import NON_COMMERCIAL_WARNING, AboutDialog
 from qr_live_scanner_tencent.gui.monitor import (
     DecodeOnlyMonitorCallbacks,
     DecodeOnlyMonitorController,
     DecodeOnlyMonitorRequest,
     DecodeOnlyMonitorSnapshot,
+    LocalDemoMonitorController,
     QtDecodeOnlyMonitorController,
 )
 from qr_live_scanner_tencent.gui.roi_editor import ROIEditorWidget
@@ -137,13 +139,21 @@ class MainWindow(QMainWindow):
         self.auto_confirm_checkbox.setEnabled(False)
         self.auto_confirm_checkbox.setToolTip(AUTO_CONFIRM_HINT)
         self.auto_exit_checkbox = QCheckBox("扫码成功后自动退出")
+        self.demo_mode_checkbox = QCheckBox("本地模拟")
+        self.demo_mode_checkbox.setToolTip("使用本地模拟指标演练 GUI，不连接直播平台。")
 
         self.selected_account_label = QLabel("绑定账号：未选择")
         self.selected_account_label.setObjectName("selected_account_label")
+        self.authorization_state_label = QLabel("账号授权：未选择")
+        self.protocol_gate_label = QLabel()
+        self.protocol_gate_label.setWordWrap(True)
         self.monitor_status_label = QLabel("监测状态：未启动")
         self.monitor_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.monitor_metrics_label = QLabel("帧数=0 候选=0 重复=0 延迟=- 解码器=-")
         self.monitor_metrics_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.last_candidate_label = QLabel("最近识别：无")
+        self.last_candidate_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.last_candidate_label.setWordWrap(True)
 
         self.roi_editor = ROIEditorWidget()
         self.license_notice = QLabel(NON_COMMERCIAL_WARNING)
@@ -154,7 +164,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("客户端就绪：只解码监测不会扫码或确认登录")
         self._restore_state(self._state)
         self._sync_platform_fields()
+        self._sync_protocol_gate_label()
         self._sync_selected_account_label()
+        self.game_combo.currentIndexChanged.connect(self._sync_protocol_gate_label)
+        self.provider_combo.currentIndexChanged.connect(self._handle_provider_changed)
 
     def _build_central_widget(self) -> QWidget:
         central = QWidget(self)
@@ -187,6 +200,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(group)
         layout.addWidget(self.account_table)
         layout.addWidget(self.selected_account_label)
+        layout.addWidget(self.authorization_state_label)
         return group
 
     def _build_stream_group(self) -> QGroupBox:
@@ -219,9 +233,12 @@ class MainWindow(QMainWindow):
         options = QHBoxLayout()
         options.addWidget(self.auto_confirm_checkbox)
         options.addWidget(self.auto_exit_checkbox)
+        options.addWidget(self.demo_mode_checkbox)
         layout.addLayout(options)
+        layout.addWidget(self.protocol_gate_label)
         layout.addWidget(self.monitor_status_label)
         layout.addWidget(self.monitor_metrics_label)
+        layout.addWidget(self.last_candidate_label)
         return group
 
     def _selected_game_id(self) -> GameID:
@@ -247,7 +264,7 @@ class MainWindow(QMainWindow):
 
     def _start_decode_only_monitoring(self) -> None:
         room_id = self.room_input.text().strip()
-        if not room_id:
+        if not room_id and not self.demo_mode_checkbox.isChecked():
             self.monitor_status_label.setText("监测状态：请输入直播间")
             self.start_button.setChecked(False)
             return
@@ -261,10 +278,14 @@ class MainWindow(QMainWindow):
             self.monitor_status_label.setText("监测状态：请选择已保存登录态的账号")
             self.start_button.setChecked(False)
             return
+        if auto_confirm_enabled and not self._is_protocol_validated():
+            self.monitor_status_label.setText("监测状态：腾讯真实协议未验证，已阻止自动确认")
+            self.start_button.setChecked(False)
+            return
 
         request = DecodeOnlyMonitorRequest(
             platform=self._selected_platform(),
-            room_id=room_id,
+            room_id=room_id or "local-demo",
             game_id=self._selected_game_id(),
             roi=self.roi_editor.roi(),
             browser_user_data_dir=self.browser_profile_input.text().strip()
@@ -283,11 +304,10 @@ class MainWindow(QMainWindow):
         )
 
         self.monitor_status_label.setText("监测状态：正在启动")
-        self.statusBar().showMessage(
-            AUTO_CONFIRM_HINT if auto_confirm_enabled else DECODE_ONLY_HINT
-        )
+        self.last_candidate_label.setText("最近识别：无")
+        self.statusBar().showMessage(self._monitor_start_hint(auto_confirm_enabled))
         try:
-            self.monitor_controller.start(request, callbacks)
+            self._active_monitor_controller().start(request, callbacks)
         except ValueError as exc:
             self.monitor_status_label.setText(f"监测状态：{exc}")
             self.start_button.setEnabled(True)
@@ -299,7 +319,15 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(True)
 
     def _stop_decode_only_monitoring(self) -> None:
-        self.monitor_controller.stop()
+        self._active_monitor_controller().stop()
+
+    def _active_monitor_controller(self) -> DecodeOnlyMonitorController:
+        if self.demo_mode_checkbox.isChecked():
+            if not isinstance(self.monitor_controller, LocalDemoMonitorController):
+                self.monitor_controller = LocalDemoMonitorController()
+        elif isinstance(self.monitor_controller, LocalDemoMonitorController):
+            self.monitor_controller = QtDecodeOnlyMonitorController(self, self.account_store)
+        return self.monitor_controller
 
     def _optional_chrome_path(self) -> str | None:
         text = self.chrome_path_input.text().strip()
@@ -331,6 +359,8 @@ class MainWindow(QMainWindow):
                 ]
             )
         )
+        summary = snapshot.last_candidate_summary or "无"
+        self.last_candidate_label.setText(f"最近识别：{summary}")
 
     def _set_monitor_error(self, message: str) -> None:
         self.monitor_status_label.setText(f"监测状态：{message}")
@@ -404,6 +434,28 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("账号登录态未保存")
         self._save_state()
 
+    def _refresh_account_authorization_rows(self) -> None:
+        selected_uid = self._selected_table_uid()
+        for uid in self._account_table_uids():
+            try:
+                authorized = self.account_store.is_tencent_authorized(
+                    uid,
+                    self._selected_provider(),
+                )
+            except AccountStoreError:
+                self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+                return
+            self._set_account_table_row(uid, "已保存" if authorized else "未保存")
+        if selected_uid:
+            row = self._account_table_row(selected_uid)
+            if row >= 0:
+                self.account_table.selectRow(row)
+
+    def _handle_provider_changed(self) -> None:
+        self._refresh_account_authorization_rows()
+        self._sync_selected_account_label()
+        self._save_state()
+
     def _show_about_dialog(self) -> None:
         AboutDialog(self).exec()
 
@@ -458,8 +510,11 @@ class MainWindow(QMainWindow):
         row = self._account_table_row(uid)
         if row < 0:
             return False
-        item = self.account_table.item(row, 1)
-        return item is not None and item.text() == "已保存"
+        try:
+            return self.account_store.is_tencent_authorized(uid, self._selected_provider())
+        except AccountStoreError:
+            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return False
 
     def _sync_default_account_marks(self) -> None:
         for row in range(self.account_table.rowCount()):
@@ -475,9 +530,13 @@ class MainWindow(QMainWindow):
         uid = self._selected_table_uid()
         self.selected_account_label.setText(f"绑定账号：{uid}" if uid else "绑定账号：未选择")
         self._sync_auto_confirm_availability()
+        self._sync_authorization_state_label()
 
     def _sync_auto_confirm_availability(self) -> None:
-        enabled = self._is_authorized_table_uid(self._selected_table_uid())
+        enabled = (
+            self._is_authorized_table_uid(self._selected_table_uid())
+            and self._is_protocol_validated()
+        )
         self.auto_confirm_checkbox.setEnabled(enabled)
         if not enabled:
             self.auto_confirm_checkbox.setChecked(False)
@@ -498,6 +557,7 @@ class MainWindow(QMainWindow):
         self.roi_editor.set_roi(state.roi)
         self.auto_confirm_checkbox.setChecked(state.auto_confirm)
         self.auto_exit_checkbox.setChecked(state.auto_exit)
+        self.demo_mode_checkbox.setChecked(state.demo_mode)
         self._default_uid = state.default_uid
         for account in state.accounts:
             self._restore_account_row(account.uid)
@@ -531,10 +591,37 @@ class MainWindow(QMainWindow):
             roi=self.roi_editor.roi(),
             auto_confirm=self.auto_confirm_checkbox.isChecked(),
             auto_exit=self.auto_exit_checkbox.isChecked(),
+            demo_mode=self.demo_mode_checkbox.isChecked(),
             default_uid=self._default_uid,
             accounts=accounts,
         )
         save_gui_state(self.state_path, state)
+
+    def _sync_protocol_gate_label(self) -> None:
+        config = _default_game_configs()[self._selected_game_id()]
+        if config.validated_protocol:
+            self.protocol_gate_label.setText("协议状态：已验证，可按授权策略执行确认")
+            return
+        self.protocol_gate_label.setText("协议状态：未验证，真实 scan/confirm 已禁用")
+        self.auto_confirm_checkbox.setChecked(False)
+        self._sync_auto_confirm_availability()
+
+    def _sync_authorization_state_label(self) -> None:
+        uid = self._selected_table_uid()
+        if not uid:
+            self.authorization_state_label.setText("账号授权：未选择")
+            return
+        provider = self._selected_provider().value
+        state = "已授权" if self._is_authorized_table_uid(uid) else "未授权"
+        self.authorization_state_label.setText(f"账号授权：{state} provider={provider}")
+
+    def _is_protocol_validated(self) -> bool:
+        return _default_game_configs()[self._selected_game_id()].validated_protocol
+
+    def _monitor_start_hint(self, auto_confirm_enabled: bool) -> str:
+        if self.demo_mode_checkbox.isChecked():
+            return "本地模拟监测：不会连接直播平台或腾讯协议"
+        return AUTO_CONFIRM_HINT if auto_confirm_enabled else DECODE_ONLY_HINT
 
     def _account_table_uids(self) -> list[str]:
         uids: list[str] = []
@@ -549,6 +636,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._save_state()
         super().closeEvent(event)
+
+
+def _default_game_configs() -> dict[GameID, TencentGameConfig]:
+    return default_game_configs()
 
 
 class ROISettingsDialog(QDialog):

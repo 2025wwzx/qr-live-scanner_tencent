@@ -52,6 +52,7 @@ class GuiState(BaseModel):
     roi: ROIConfig = DEFAULT_AGGRESSIVE_ROI
     auto_confirm: bool = False
     auto_exit: bool = False
+    demo_mode: bool = False
     default_uid: str = ""
     accounts: list[GuiAccountEntry] = Field(default_factory=list)
 

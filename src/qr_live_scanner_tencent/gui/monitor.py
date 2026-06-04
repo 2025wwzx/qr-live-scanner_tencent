@@ -25,6 +25,7 @@ __all__ = [
     "DecodeOnlyMonitorController",
     "DecodeOnlyMonitorRequest",
     "DecodeOnlyMonitorSnapshot",
+    "LocalDemoMonitorController",
     "QtDecodeOnlyMonitorController",
 ]
 
@@ -52,6 +53,49 @@ class DecodeOnlyMonitorController(Protocol):
 
     def is_running(self) -> bool:
         """返回监测线程是否仍在运行。"""
+
+
+class LocalDemoMonitorController:
+    """本地 GUI 演练 controller，不访问直播平台或腾讯协议。"""
+
+    def __init__(self) -> None:
+        self._running = False
+        self._callbacks: DecodeOnlyMonitorCallbacks | None = None
+
+    def start(
+        self,
+        request: DecodeOnlyMonitorRequest,
+        callbacks: DecodeOnlyMonitorCallbacks,
+    ) -> None:
+        if self._running:
+            msg = "local demo monitor is already running"
+            raise ValueError(msg)
+        self._running = True
+        self._callbacks = callbacks
+        callbacks.on_status("本地模拟监测中")
+        callbacks.on_snapshot(
+            DecodeOnlyMonitorSnapshot(
+                state="streaming",
+                frames_seen=5,
+                candidates_seen=1,
+                duplicate_candidates=0,
+                last_latency_ms=1.25,
+                last_backend="synthetic",
+                last_roi=request.roi,
+                last_candidate_summary="模拟二维码候选（内容已隐藏）",
+            )
+        )
+
+    def stop(self) -> None:
+        if not self._running:
+            return
+        self._running = False
+        if self._callbacks is not None:
+            self._callbacks.on_finished()
+        self._callbacks = None
+
+    def is_running(self) -> bool:
+        return self._running
 
 
 class DecodeOnlyMonitorWorker(QObject):

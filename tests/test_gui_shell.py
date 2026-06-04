@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtWidgets import QDialog, QGroupBox, QMenu
@@ -255,11 +256,15 @@ def test_main_window_contains_core_controls(qtbot: QtBot) -> None:
     assert window.about_button.text() == "关于"
     assert window.auto_confirm_checkbox.text() == "自动二次确认"
     assert window.auto_confirm_checkbox.isEnabled() is False
+    assert window.demo_mode_checkbox.text() == "本地模拟"
     assert window.selected_account_label.text() == "绑定账号：未选择"
+    assert window.authorization_state_label.text() == "账号授权：未选择"
+    assert "真实 scan/confirm 已禁用" in window.protocol_gate_label.text()
     assert not hasattr(window, "screen_monitor_button")
     assert not hasattr(window, "auto_start_checkbox")
     assert "未启动" in window.monitor_status_label.text()
     assert "帧数=0" in window.monitor_metrics_label.text()
+    assert window.last_candidate_label.text() == "最近识别：无"
     assert not hasattr(window, "uid_input")
     assert not hasattr(window, "account_status_label")
     assert not hasattr(window, "authorize_button")
@@ -321,12 +326,58 @@ def test_main_window_starts_decode_only_monitoring(qtbot: QtBot) -> None:
     assert "帧数=3" in window.monitor_metrics_label.text()
     assert "候选=1" in window.monitor_metrics_label.text()
     assert "payload" not in window.monitor_metrics_label.text().lower()
+    assert window.last_candidate_label.text() == "最近识别：无"
     assert window.start_button.isEnabled() is False
     assert window.start_button.isChecked() is True
     assert window.stop_button.isEnabled() is True
 
 
-def test_main_window_binds_selected_account_to_auto_confirm_monitoring(qtbot: QtBot) -> None:
+def test_main_window_local_demo_monitor_runs_without_room_id(qtbot: QtBot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.demo_mode_checkbox.setChecked(True)
+
+    window.start_button.click()
+
+    assert "本地模拟监测中" in window.monitor_status_label.text()
+    assert "帧数=5" in window.monitor_metrics_label.text()
+    assert "解码器=synthetic" in window.monitor_metrics_label.text()
+    assert "内容已隐藏" in window.last_candidate_label.text()
+    assert "payload" not in window.last_candidate_label.text().lower()
+    assert "本地模拟监测" in window.statusBar().currentMessage()
+    assert window.stop_button.isEnabled() is True
+
+
+def test_main_window_binds_selected_account_to_auto_confirm_monitoring(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    controller = RecordingMonitorController()
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("10001"),
+        authorized=True,
+    )
+    config = main_window_module._default_game_configs()[GameID.HONOR_OF_KINGS]
+    monkeypatch.setattr(
+        main_window_module,
+        "_default_game_configs",
+        lambda: {GameID.HONOR_OF_KINGS: replace(config, validated_protocol=True)},
+    )
+    window = MainWindow(account_store=store, monitor_controller=controller)
+    qtbot.addWidget(window)
+    window._refresh_account_table_row("10001")
+    window.auto_confirm_checkbox.setChecked(True)
+    window.room_input.setText("5373751")
+
+    window.start_button.click()
+
+    assert controller.started_request is not None
+    assert controller.started_request.account_uid == "10001"
+    assert controller.started_request.auto_confirm is True
+    assert window.selected_account_label.text() == "绑定账号：10001"
+
+
+def test_main_window_blocks_auto_confirm_when_protocol_is_unvalidated(qtbot: QtBot) -> None:
     controller = RecordingMonitorController()
     store = FakeAccountStore()
     store.save_tencent_session(
@@ -341,10 +392,10 @@ def test_main_window_binds_selected_account_to_auto_confirm_monitoring(qtbot: Qt
 
     window.start_button.click()
 
-    assert controller.started_request is not None
-    assert controller.started_request.account_uid == "10001"
-    assert controller.started_request.auto_confirm is True
-    assert window.selected_account_label.text() == "绑定账号：10001"
+    assert controller.started_request is None
+    assert "腾讯真实协议未验证" in window.monitor_status_label.text()
+    assert "真实 scan/confirm 已禁用" in window.protocol_gate_label.text()
+    assert window.auto_confirm_checkbox.isEnabled() is False
 
 
 def test_main_window_requires_bound_account_for_auto_confirm(qtbot: QtBot) -> None:
@@ -456,7 +507,9 @@ def test_main_window_add_account_opens_qr_dialog_and_refreshes_account_table(
     assert status_item is not None
     assert uid_item.text() == "10001"
     assert status_item.text() == "已保存"
-    assert window.auto_confirm_checkbox.isEnabled() is True
+    assert window.auto_confirm_checkbox.isEnabled() is False
+    assert window.authorization_state_label.text() == "账号授权：已授权 provider=qq"
+    assert "真实 scan/confirm 已禁用" in window.protocol_gate_label.text()
 
 
 def test_main_window_account_table_updates_rows_by_uid(qtbot: QtBot) -> None:
@@ -483,6 +536,31 @@ def test_main_window_account_table_updates_rows_by_uid(qtbot: QtBot) -> None:
     assert second_uid_item is not None
     assert first_uid_item.text() == "10001"
     assert second_uid_item.text() == "10002"
+
+
+def test_main_window_refreshes_authorization_when_provider_changes(qtbot: QtBot) -> None:
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("10001"),
+        authorized=True,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window._refresh_account_table_row("10001")
+
+    status_item = window.account_table.item(0, 1)
+    assert status_item is not None
+    assert status_item.text() == "已保存"
+    assert window.authorization_state_label.text() == "账号授权：已授权 provider=qq"
+
+    window.provider_combo.setCurrentIndex(
+        window.provider_combo.findData(TencentLoginProvider.WECHAT.value)
+    )
+
+    status_item = window.account_table.item(0, 1)
+    assert status_item is not None
+    assert status_item.text() == "未保存"
+    assert window.authorization_state_label.text() == "账号授权：未授权 provider=wechat"
 
 
 def test_main_window_can_set_default_account(qtbot: QtBot) -> None:
@@ -528,6 +606,7 @@ def test_main_window_persists_and_restores_gui_state(qtbot: QtBot, tmp_path: Pat
     window.chrome_path_input.setText("")
     window.roi_editor.set_roi(ROIConfig(x=0.1, y=0.2, width=0.3, height=0.4))
     window.auto_exit_checkbox.setChecked(True)
+    window.demo_mode_checkbox.setChecked(True)
     window._refresh_account_table_row("10001")
     window._set_selected_account_as_default()
     window._save_state()
@@ -542,6 +621,7 @@ def test_main_window_persists_and_restores_gui_state(qtbot: QtBot, tmp_path: Pat
     assert restored.chrome_path_input.text() == ""
     assert restored.roi_editor.roi() == ROIConfig(x=0.1, y=0.2, width=0.3, height=0.4)
     assert restored.auto_exit_checkbox.isChecked() is True
+    assert restored.demo_mode_checkbox.isChecked() is True
     assert restored.account_table.rowCount() == 1
     restored_uid_item = restored.account_table.item(0, 0)
     restored_default_item = restored.account_table.item(0, 2)

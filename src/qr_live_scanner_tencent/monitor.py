@@ -7,7 +7,11 @@ from pathlib import Path
 
 import httpx
 
-from qr_live_scanner_tencent.auth.tencent import TencentGameAuthAdapter, default_game_configs
+from qr_live_scanner_tencent.auth.tencent import (
+    TencentGameAuthAdapter,
+    default_game_configs,
+    parse_tencent_game_qr_payload,
+)
 from qr_live_scanner_tencent.detection import DecoderChain, QRDeduplicator, ZxingDecoder
 from qr_live_scanner_tencent.interfaces import (
     AccountRef,
@@ -15,6 +19,7 @@ from qr_live_scanner_tencent.interfaces import (
     AuthMode,
     AuthorizationError,
     GameID,
+    QRCandidate,
     QRDecoder,
     ROIConfig,
     StreamSource,
@@ -73,6 +78,7 @@ class DecodeOnlyMonitorSnapshot:
     last_latency_ms: float | None
     last_backend: str | None
     last_roi: ROIConfig | None
+    last_candidate_summary: str | None = None
     authorization_failures: int = 0
     scan_sent: int = 0
     confirm_sent: int = 0
@@ -114,7 +120,15 @@ async def run_decode_only_monitor(
         )
         last_backend: str | None = None
         last_roi: ROIConfig | None = None
-        snapshot = _snapshot("streaming", pipeline.metrics, last_backend, last_roi, auto_confirm)
+        last_candidate_summary: str | None = None
+        snapshot = _snapshot(
+            "streaming",
+            pipeline.metrics,
+            last_backend,
+            last_roi,
+            last_candidate_summary,
+            auto_confirm,
+        )
 
         async for frame in source.frames(stream_info):
             if stop():
@@ -123,6 +137,7 @@ async def run_decode_only_monitor(
                     pipeline.metrics,
                     last_backend,
                     last_roi,
+                    last_candidate_summary,
                     auto_confirm,
                 )
                 break
@@ -131,6 +146,7 @@ async def run_decode_only_monitor(
             if candidate is not None:
                 last_backend = candidate.backend
                 last_roi = candidate.roi
+                last_candidate_summary = _safe_candidate_summary(candidate)
                 try:
                     confirm = (
                         await auto_confirm.orchestrator.handle_candidate(
@@ -153,6 +169,7 @@ async def run_decode_only_monitor(
                         pipeline.metrics,
                         last_backend,
                         last_roi,
+                        last_candidate_summary,
                         auto_confirm,
                     )
                     if on_snapshot is not None:
@@ -164,6 +181,7 @@ async def run_decode_only_monitor(
                 pipeline.metrics,
                 last_backend,
                 last_roi,
+                last_candidate_summary,
                 auto_confirm,
             )
             if on_snapshot is not None:
@@ -175,6 +193,7 @@ async def run_decode_only_monitor(
                     pipeline.metrics,
                     last_backend,
                     last_roi,
+                    last_candidate_summary,
                     auto_confirm,
                 )
                 break
@@ -184,11 +203,19 @@ async def run_decode_only_monitor(
                 pipeline.metrics,
                 last_backend,
                 last_roi,
+                last_candidate_summary,
                 auto_confirm,
             )
 
         if stop() and snapshot.state != "stopped":
-            snapshot = _snapshot("stopped", pipeline.metrics, last_backend, last_roi, auto_confirm)
+            snapshot = _snapshot(
+                "stopped",
+                pipeline.metrics,
+                last_backend,
+                last_roi,
+                last_candidate_summary,
+                auto_confirm,
+            )
         return snapshot
     finally:
         if auto_confirm is not None and auto_confirm.close is not None:
@@ -226,6 +253,7 @@ def _snapshot(
     metrics: PipelineMetrics,
     last_backend: str | None,
     last_roi: ROIConfig | None,
+    last_candidate_summary: str | None,
     auto_confirm: AutoConfirmMonitorRequest | None,
 ) -> DecodeOnlyMonitorSnapshot:
     orchestrator_metrics = auto_confirm.orchestrator.metrics if auto_confirm is not None else None
@@ -237,6 +265,7 @@ def _snapshot(
         last_latency_ms=metrics.last_processing_latency_ms,
         last_backend=last_backend,
         last_roi=last_roi,
+        last_candidate_summary=last_candidate_summary,
         authorization_failures=(
             0 if orchestrator_metrics is None else orchestrator_metrics.authorization_failures
         ),
@@ -250,6 +279,14 @@ def _snapshot(
 
 def _never_stop() -> bool:
     return False
+
+
+def _safe_candidate_summary(candidate: QRCandidate) -> str:
+    try:
+        parsed = parse_tencent_game_qr_payload(candidate.payload)
+    except AuthorizationError:
+        return "二维码候选（内容已隐藏）"
+    return parsed.safe_description()
 
 
 def build_auto_confirm_request(

@@ -20,6 +20,7 @@ def test_gui_state_round_trips_non_sensitive_monitor_and_account_index(tmp_path:
         roi=ROIConfig(x=0.1, y=0.2, width=0.3, height=0.4),
         auto_confirm=True,
         auto_exit=True,
+        demo_mode=True,
         default_uid="10001",
         accounts=[
             GuiAccountEntry(uid="10001", display_name="main"),
