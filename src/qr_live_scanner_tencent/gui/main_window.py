@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
+from typing import Protocol
 
+import httpx
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -23,7 +28,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qr_live_scanner_tencent.accounts import KeyringAccountStore, TencentSession
+from qr_live_scanner_tencent.accounts import (
+    KeyringAccountStore,
+    LocalDeviceIdStore,
+    TencentAccountQRLoginError,
+    TencentAccountQRLoginService,
+    TencentAccountQRLoginState,
+    TencentAccountQRLoginStatus,
+    TencentAccountQRTicket,
+    TencentSession,
+)
 from qr_live_scanner_tencent.auth.tencent import TencentGameConfig, default_game_configs
 from qr_live_scanner_tencent.gui.about import NON_COMMERCIAL_WARNING, AboutDialog
 from qr_live_scanner_tencent.gui.monitor import (
@@ -68,6 +82,31 @@ ROI_PRESETS = {
 ROI_DEBUG_PRESET_NAME = "专业调试"
 
 
+ACCOUNT_QR_OUTPUT_PATH = Path("work/tencent-account-login-qr.png")
+ACCOUNT_QR_LOGIN_ERROR_HINT = (
+    "Tencent account login is not validated; use a mock or validated config first"
+)
+
+
+class TencentAccountQRLoginServiceProtocol(Protocol):
+    async def fetch_qr(self) -> TencentAccountQRTicket:
+        """Create a QR ticket for rendering."""
+
+    async def query_qr(self, ticket: TencentAccountQRTicket) -> TencentAccountQRLoginStatus:
+        """Poll QR login status."""
+
+    def write_qr_png(self, ticket: TencentAccountQRTicket, output_path: Path) -> None:
+        """Render the QR payload into a local PNG."""
+
+    async def aclose(self) -> None:
+        """Close runtime resources."""
+
+
+class TencentAccountQRLoginServiceFactory(Protocol):
+    def __call__(self, provider: TencentLoginProvider) -> TencentAccountQRLoginServiceProtocol:
+        """Return a Tencent account QR login service for the selected provider."""
+
+
 class MainWindow(QMainWindow):
     """桌面端主窗口外壳；真实监测只解码，登录态流程不触发 confirm。"""
 
@@ -76,10 +115,16 @@ class MainWindow(QMainWindow):
         parent: QWidget | None = None,
         account_store: AccountStore | None = None,
         monitor_controller: DecodeOnlyMonitorController | None = None,
+        account_qr_login_service_factory: TencentAccountQRLoginServiceFactory | None = None,
         state_path: str | Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.account_store = account_store if account_store is not None else KeyringAccountStore()
+        self.account_qr_login_service_factory = (
+            account_qr_login_service_factory
+            if account_qr_login_service_factory is not None
+            else _new_account_qr_login_service
+        )
         self.monitor_controller = (
             monitor_controller
             if monitor_controller is not None
@@ -399,24 +444,17 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("本地账号已删除")
 
     def _show_add_account_dialog(self) -> None:
-        dialog = TencentAccountDialog(parent=self)
+        dialog = TencentAccountDialog(
+            parent=self,
+            provider=self._selected_provider(),
+            account_store=self.account_store,
+            service_factory=self.account_qr_login_service_factory,
+        )
         if dialog.exec() != int(QDialog.DialogCode.Accepted):
             return
         uid = dialog.uid()
         if not uid:
             self.statusBar().showMessage("账号未保存：UID 为空")
-            return
-        try:
-            self.account_store.save_tencent_session(
-                TencentSession(
-                    uid=uid,
-                    provider=self._selected_provider(),
-                    credentials={"placeholder": "manual-protocol-validation-required"},
-                ),
-                authorized=True,
-            )
-        except AccountStoreError:
-            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
             return
         self._refresh_account_table_row(uid)
 
@@ -703,7 +741,7 @@ class ROISettingsDialog(QDialog):
         self.editor_group.setVisible(True)
 
 
-class TencentAccountDialog(QDialog):
+class _ManualTencentAccountDialog(QDialog):
     """首版腾讯账号占位授权对话框。
 
     真实 QQ/微信扫码授权协议尚未验证，当前只保存用户手动填写的本地账号标识，
@@ -732,6 +770,158 @@ class TencentAccountDialog(QDialog):
 
     def uid(self) -> str:
         return self.uid_input.text().strip()
+
+
+def _new_account_qr_login_service(provider: TencentLoginProvider) -> TencentAccountQRLoginService:
+    return TencentAccountQRLoginService(
+        client=httpx.AsyncClient(timeout=10.0),
+        device_id_store=LocalDeviceIdStore.default(),
+        config=TencentAccountQRLoginService.default_configs()[provider],
+    )
+
+
+class TencentAccountDialog(QDialog):
+    """腾讯账号二维码登录弹窗。
+
+    默认真实 QQ/微信协议仍然未验证，因此普通运行时会在发 HTTP 前安全失败。
+    测试或后续正式接入可以注入 `service_factory`，由 service 生成二维码并返回确认会话。
+    """
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        account_store: AccountStore | None = None,
+        service_factory: TencentAccountQRLoginServiceFactory | None = None,
+        qr_output_path: Path = ACCOUNT_QR_OUTPUT_PATH,
+        timeout_seconds: float = 60.0,
+        poll_interval_seconds: float = 2.0,
+    ) -> None:
+        super().__init__(parent)
+        self._provider = TencentLoginProvider(str(provider))
+        self._account_store = account_store if account_store is not None else KeyringAccountStore()
+        self._service_factory = (
+            service_factory if service_factory is not None else _new_account_qr_login_service
+        )
+        self._qr_output_path = Path(qr_output_path)
+        self._timeout_seconds = timeout_seconds
+        self._poll_interval_seconds = poll_interval_seconds
+        self._uid = ""
+
+        self.setWindowTitle("Tencent account QR login")
+        self.provider_label = QLabel(f"Provider: {self._provider.value}")
+        self.status_label = QLabel("Ready")
+        self.status_label.setWordWrap(True)
+        self.qr_path_label = QLabel("QR image: -")
+        self.qr_path_label.setWordWrap(True)
+        self.start_login_button = QPushButton("Generate QR")
+        self.start_login_button.clicked.connect(self._run_qr_login)
+
+        self.demo_qr_button = QPushButton("Generate dry-run QR")
+        self.demo_qr_button.clicked.connect(self._write_dry_run_qr)
+
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        self.ok_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.ok_button.setEnabled(False)
+        self.buttons.accepted.connect(self.accept)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.provider_label)
+        layout.addWidget(self.start_login_button)
+        layout.addWidget(self.demo_qr_button)
+        layout.addWidget(self.qr_path_label)
+        layout.addWidget(self.status_label)
+        layout.addWidget(self.buttons)
+
+    def uid(self) -> str:
+        return self._uid
+
+    def _run_qr_login(self) -> None:
+        self.start_login_button.setEnabled(False)
+        service = self._service_factory(self._provider)
+        try:
+            session = asyncio.run(
+                self._capture_session(
+                    service,
+                    qr_output_path=self._qr_output_path,
+                    timeout_seconds=self._timeout_seconds,
+                    poll_interval_seconds=self._poll_interval_seconds,
+                )
+            )
+            self._account_store.save_tencent_session(session, authorized=True)
+        except AccountStoreError:
+            self.status_label.setText(ACCOUNT_STORE_ERROR_HINT)
+            return
+        except (TencentAccountQRLoginError, ValueError):
+            self.status_label.setText(ACCOUNT_QR_LOGIN_ERROR_HINT)
+            return
+        finally:
+            self.start_login_button.setEnabled(True)
+        self._uid = session.uid
+        self.ok_button.setEnabled(True)
+        self.status_label.setText("Tencent account session saved")
+        self.accept()
+
+    def _write_dry_run_qr(self) -> None:
+        service = TencentAccountQRLoginService.dry_run(
+            provider=self._provider,
+            device_id_store=LocalDeviceIdStore.default(),
+        )
+        try:
+            ticket = service.dry_run_ticket()
+            service.write_qr_png(ticket, self._qr_output_path)
+            self.qr_path_label.setText(f"QR image: {self._qr_output_path}")
+            self.status_label.setText("Dry-run QR image generated")
+        finally:
+            asyncio.run(service.aclose())
+
+    async def _capture_session(
+        self,
+        service: TencentAccountQRLoginServiceProtocol,
+        *,
+        qr_output_path: Path,
+        timeout_seconds: float,
+        poll_interval_seconds: float,
+    ) -> TencentSession:
+        try:
+            ticket = await service.fetch_qr()
+            service.write_qr_png(ticket, qr_output_path)
+            self.qr_path_label.setText(f"QR image: {qr_output_path}")
+            self.status_label.setText("QR generated; waiting for scan")
+            QApplication.processEvents()
+            deadline = time.monotonic() + timeout_seconds
+            scanned_reported = False
+            while time.monotonic() < deadline:
+                status = await service.query_qr(ticket)
+                if status.state is TencentAccountQRLoginState.SCANNED and not scanned_reported:
+                    scanned_reported = True
+                    self.status_label.setText("QR scanned; waiting for confirmation")
+                    QApplication.processEvents()
+                elif status.state is TencentAccountQRLoginState.CONFIRMED:
+                    if status.session is None:
+                        msg = "confirmed Tencent account session is missing"
+                        raise TencentAccountQRLoginError(msg)
+                    return status.session
+                elif status.state is TencentAccountQRLoginState.EXPIRED:
+                    msg = "Tencent account QR login expired"
+                    raise TencentAccountQRLoginError(msg)
+                elif status.state is TencentAccountQRLoginState.FAILED:
+                    msg = "Tencent account QR login failed"
+                    raise TencentAccountQRLoginError(msg)
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(poll_interval_seconds, remaining))
+
+            msg = "Tencent account QR login timed out"
+            raise TencentAccountQRLoginError(msg)
+        finally:
+            try:
+                await service.aclose()
+            except Exception:
+                self.status_label.setText("Tencent account QR service close failed")
 
 
 CLIENT_STYLE_SHEET = """

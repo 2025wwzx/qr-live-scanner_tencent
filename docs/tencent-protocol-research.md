@@ -15,6 +15,23 @@ rejected before any QR payload or Tencent session can be sent.
 - Game: Wangzhe Rongyao / Honor of Kings.
 - Providers: QQ by default, WeChat reserved.
 - Runtime: decode-only monitoring is available; scan/confirm is mock-only.
+- Account login: the project can generate a local QQ/WeChat account QR login
+  ticket through `TencentAccountQRLoginService`, but default configs remain
+  gated with `validated_protocol=False`. Dry-run QR generation is local-only;
+  confirmed sessions are saved only from mocked or explicitly validated flows.
+
+## Account QR Login Validation
+
+Validate these provider-account-login fields separately from game scan/confirm:
+
+- QR creation endpoint or official OAuth/QR URL builder and required app ID.
+- Poll/query endpoint, callback handling, or other confirmation mechanism.
+- Confirmed status schema and account identifier field.
+- Credential family saved into `TencentSession.credentials`.
+- Expiry/refresh behavior and whether provider-specific risk checks are needed.
+
+Until those fields are verified, the account QR login service must not send real
+QQ/WeChat HTTP. Tests must use `httpx.MockTransport` or injected GUI services.
 
 ## Required Validation
 

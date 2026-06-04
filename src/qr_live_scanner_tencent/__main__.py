@@ -6,15 +6,31 @@ import json
 import math
 import os
 import re
+import time
 from pathlib import Path
+from typing import Protocol
+
+import httpx
 
 import qr_live_scanner_tencent.smoke as smoke_module
+from qr_live_scanner_tencent.accounts import (
+    KeyringAccountStore,
+    LocalDeviceIdStore,
+    TencentAccountQRLoginError,
+    TencentAccountQRLoginService,
+    TencentAccountQRLoginState,
+    TencentAccountQRLoginStatus,
+    TencentAccountQRTicket,
+    TencentSession,
+)
 from qr_live_scanner_tencent.interfaces import (
     DEFAULT_AGGRESSIVE_ROI,
+    AccountStoreError,
     AuthMode,
     GameID,
     QRLiveScannerError,
     ROIConfig,
+    TencentLoginProvider,
 )
 from qr_live_scanner_tencent.security import redact_har
 from qr_live_scanner_tencent.smoke import (
@@ -30,6 +46,20 @@ from qr_live_scanner_tencent.smoke import (
 ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+class TencentAccountQRLoginServiceProtocol(Protocol):
+    async def fetch_qr(self) -> TencentAccountQRTicket:
+        """Create a QR ticket for rendering."""
+
+    async def query_qr(self, ticket: TencentAccountQRTicket) -> TencentAccountQRLoginStatus:
+        """Poll QR login status."""
+
+    def write_qr_png(self, ticket: TencentAccountQRTicket, output_path: Path) -> None:
+        """Render the QR payload into a local PNG."""
+
+    async def aclose(self) -> None:
+        """Close runtime resources."""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -43,6 +73,10 @@ def main(argv: list[str] | None = None) -> int:
         return _run_redact_har(args)
     if args.command == "gui":
         return _run_gui(args)
+    if args.command == "tencent-login":
+        return _run_tencent_login(args)
+    if args.command == "tencent-status":
+        return _run_tencent_status(args)
     parser.print_help()
     return 0
 
@@ -111,6 +145,25 @@ def _build_parser() -> argparse.ArgumentParser:
 
     gui_parser = subparsers.add_parser("gui")
     gui_parser.add_argument("--dry-run", action="store_true")
+
+    tencent_login_parser = subparsers.add_parser("tencent-login")
+    tencent_login_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+    tencent_login_parser.add_argument("--dry-run", action="store_true")
+    tencent_login_parser.add_argument("--qr-output", default="work/tencent-login-qr.png")
+    tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
+    tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
+
+    tencent_status_parser = subparsers.add_parser("tencent-status")
+    tencent_status_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+    tencent_status_parser.add_argument("--uid", required=True)
 
     redact_parser = subparsers.add_parser("redact-har")
     redact_parser.add_argument("--input", required=True)
@@ -409,6 +462,149 @@ def _run_gui(args: argparse.Namespace) -> int:
     window = MainWindow(state_path=DEFAULT_GUI_STATE_PATH)
     window.show()
     return int(app.exec())
+
+
+def _run_tencent_login(args: argparse.Namespace) -> int:
+    try:
+        provider = TencentLoginProvider(str(args.provider))
+        qr_output_path = Path(_required_text(args.qr_output, "QR output path"))
+        timeout_seconds = _validate_tencent_login_timeout(float(args.timeout_seconds))
+        poll_interval_seconds = _validate_tencent_login_poll_interval(
+            float(args.poll_interval_seconds)
+        )
+        if bool(args.dry_run):
+            service = TencentAccountQRLoginService.dry_run(
+                provider=provider,
+                device_id_store=LocalDeviceIdStore.default(),
+            )
+            try:
+                ticket = service.dry_run_ticket()
+                service.write_qr_png(ticket, qr_output_path)
+            finally:
+                asyncio.run(service.aclose())
+            print(f"Tencent account QR dry-run image written: {qr_output_path}")
+            print("Tencent account login dry-run ready")
+            return 0
+
+        service = _new_tencent_account_qr_login_service(provider)
+        session = asyncio.run(
+            _capture_tencent_session_from_qr(
+                service,
+                qr_output_path=qr_output_path,
+                timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+        )
+        KeyringAccountStore().save_tencent_session(session, authorized=True)
+    except (ValueError, QRLiveScannerError, TencentAccountQRLoginError) as exc:
+        print(f"[WARN] Tencent account QR login failed: {exc}")
+        return 2
+    print("Tencent account session saved")
+    return 0
+
+
+def _run_tencent_status(args: argparse.Namespace) -> int:
+    try:
+        provider = TencentLoginProvider(str(args.provider))
+        uid = _required_text(args.uid, "uid")
+        store = KeyringAccountStore()
+        session = store.get_tencent_session(uid, provider)
+        if session is None:
+            print("Tencent account session status: missing")
+            return 1
+        if not store.is_tencent_authorized(uid, provider):
+            print("Tencent account session status: saved but not authorized")
+            return 1
+    except AccountStoreError:
+        print("[WARN] Tencent account status failed: credential storage unavailable")
+        return 2
+    except ValueError as exc:
+        print(f"[WARN] Tencent account status failed: {exc}")
+        return 2
+    print("Tencent account session status: saved and authorized")
+    return 0
+
+
+def _new_tencent_account_qr_login_service(
+    provider: TencentLoginProvider,
+) -> TencentAccountQRLoginService:
+    config = TencentAccountQRLoginService.default_configs()[provider]
+    return TencentAccountQRLoginService(
+        client=httpx.AsyncClient(timeout=10.0),
+        device_id_store=LocalDeviceIdStore.default(),
+        config=config,
+    )
+
+
+def _validate_tencent_login_timeout(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        msg = "timeout seconds must be finite and positive"
+        raise ValueError(msg)
+    return value
+
+
+def _validate_tencent_login_poll_interval(value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        msg = "poll interval seconds must be finite and positive"
+        raise ValueError(msg)
+    return value
+
+
+async def _capture_tencent_session_from_qr(
+    service: TencentAccountQRLoginServiceProtocol,
+    *,
+    qr_output_path: Path,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+) -> TencentSession:
+    try:
+        ticket = await service.fetch_qr()
+        service.write_qr_png(ticket, qr_output_path)
+        print(f"Tencent account QR image written: {qr_output_path}")
+        deadline = time.monotonic() + timeout_seconds
+        scanned_reported = False
+        while time.monotonic() < deadline:
+            status = await service.query_qr(ticket)
+            if status.state is TencentAccountQRLoginState.SCANNED and not scanned_reported:
+                scanned_reported = True
+                print("Tencent account QR scanned; waiting for mobile confirmation")
+            elif status.state is TencentAccountQRLoginState.CONFIRMED:
+                if status.session is None:
+                    msg = "confirmed Tencent account session is missing"
+                    raise TencentAccountQRLoginError(msg)
+                return status.session
+            elif status.state is TencentAccountQRLoginState.EXPIRED:
+                msg = "Tencent account QR login expired"
+                raise TencentAccountQRLoginError(msg)
+            elif status.state is TencentAccountQRLoginState.FAILED:
+                msg = "Tencent account QR login failed"
+                raise TencentAccountQRLoginError(msg)
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(poll_interval_seconds, remaining))
+
+        msg = "Tencent account QR login timed out"
+        raise TencentAccountQRLoginError(msg)
+    finally:
+        try:
+            await service.aclose()
+        except Exception:
+            print("[WARN] Tencent account QR service close failed")
+        finally:
+            try:
+                _remove_tencent_qr_png(qr_output_path)
+            except TencentAccountQRLoginError as exc:
+                print(f"[WARN] Tencent account QR cleanup failed: {exc}")
+
+
+def _remove_tencent_qr_png(output_path: Path) -> None:
+    try:
+        output_path.unlink(missing_ok=True)
+    except OSError as exc:
+        msg = "Tencent account QR cleanup failed"
+        raise TencentAccountQRLoginError(msg) from exc
 
 
 if __name__ == "__main__":

@@ -7,9 +7,15 @@ from pytestqt.qtbot import QtBot
 
 import qr_live_scanner_tencent.gui as gui_package
 import qr_live_scanner_tencent.gui.main_window as main_window_module
-from qr_live_scanner_tencent.accounts import FakeAccountStore, TencentSession
+from qr_live_scanner_tencent.accounts import (
+    FakeAccountStore,
+    TencentAccountQRLoginState,
+    TencentAccountQRLoginStatus,
+    TencentAccountQRTicket,
+    TencentSession,
+)
 from qr_live_scanner_tencent.gui import AboutDialog, MainWindow, ROIEditorWidget
-from qr_live_scanner_tencent.gui.main_window import ROISettingsDialog
+from qr_live_scanner_tencent.gui.main_window import ROISettingsDialog, TencentAccountDialog
 from qr_live_scanner_tencent.gui.monitor import (
     DecodeOnlyMonitorCallbacks,
     DecodeOnlyMonitorRequest,
@@ -641,3 +647,65 @@ def test_main_window_redacts_account_store_errors(qtbot: QtBot) -> None:
     assert "SECRET_TOKEN_VALUE" not in window.statusBar().currentMessage()
     assert "token" not in window.statusBar().currentMessage().lower()
     assert "cookie" not in window.statusBar().currentMessage().lower()
+
+
+def test_tencent_account_dialog_generates_qr_and_saves_confirmed_session(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    store = FakeAccountStore()
+    output_path = tmp_path / "tencent-account-login.png"
+    closed: list[bool] = []
+
+    class FakeService:
+        async def fetch_qr(self) -> TencentAccountQRTicket:
+            return TencentAccountQRTicket(
+                provider=TencentLoginProvider.QQ,
+                app_id="test-app",
+                ticket="SECRET_TICKET",
+                qr_url="https://example.test/qq/qr?ticket=SECRET_TICKET",
+                device_id="0123456789abcdef0123456789abcdef",
+            )
+
+        async def query_qr(self, ticket: TencentAccountQRTicket) -> TencentAccountQRLoginStatus:
+            assert ticket.ticket == "SECRET_TICKET"
+            return TencentAccountQRLoginStatus(
+                provider=TencentLoginProvider.QQ,
+                state=TencentAccountQRLoginState.CONFIRMED,
+                session=TencentSession(
+                    uid="10001",
+                    provider=TencentLoginProvider.QQ,
+                    credentials={
+                        "access_token": "SECRET_ACCESS_TOKEN",
+                        "openid": "SECRET_OPENID",
+                    },
+                ),
+            )
+
+        def write_qr_png(self, ticket: TencentAccountQRTicket, path: Path) -> None:
+            assert ticket.qr_url == "https://example.test/qq/qr?ticket=SECRET_TICKET"
+            path.write_bytes(b"PNG")
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    dialog = TencentAccountDialog(
+        provider=TencentLoginProvider.QQ,
+        account_store=store,
+        service_factory=lambda _provider: FakeService(),
+        qr_output_path=output_path,
+        timeout_seconds=1,
+        poll_interval_seconds=0.01,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog._run_qr_login()
+
+    assert dialog.uid() == "10001"
+    assert output_path.exists()
+    assert closed == [True]
+    assert store.get_tencent_session("10001", TencentLoginProvider.QQ) is not None
+    assert store.is_tencent_authorized("10001", TencentLoginProvider.QQ) is True
+    assert "SECRET_TICKET" not in dialog.status_label.text()
+    assert "SECRET_ACCESS_TOKEN" not in dialog.status_label.text()
+    assert "10001" not in dialog.status_label.text()
