@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qr-live-scanner-tencent"
+version = "0.1.0"
+description = "Low-latency live-stream QR scanner shell for Tencent game QR login research."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "CC BY-NC 4.0" }
+authors = [{ name = "qr-live-scanner-tencent contributors" }]
+dependencies = [
+  "cryptography",
+  "httpx",
+  "imageio-ffmpeg",
+  "keyring",
+  "numpy",
+  "opencv-python-headless",
+  "pillow",
+  "playwright",
+  "pydantic>=2",
+  "pydantic-settings",
+  "pyzbar",
+  "qasync",
+  "PySide6",
+  "qrcode[pil]",
+  "structlog",
+  "zxing-cpp",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-asyncio",
+  "pytest-cov",
+  "pytest-httpx",
+  "pytest-qt",
+  "respx",
+  "ruff",
+  "mypy",
+]
+
+[project.scripts]
+qr-live-scanner-tencent = "qr_live_scanner_tencent.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_return_any = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["imageio_ffmpeg", "pyzbar.*", "qrcode", "zxingcpp"]
+ignore_missing_imports = true

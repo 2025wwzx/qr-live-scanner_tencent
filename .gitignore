@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tests and tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.worktrees
+.worktrees/
+work/
+
+# Local config and secrets
+.env
+.env.*
+!.env.example
+*.local.toml
+secrets/
+tokens/
+profiles/
+
+# Runtime output
+logs/
+output/
+captures/
+*.log
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
