@@ -1262,9 +1262,48 @@ def test_tencent_account_dialog_generates_qr_and_saves_confirmed_session(
     assert closed == [True]
     assert store.get_tencent_session("10001", TencentLoginProvider.QQ) is not None
     assert store.is_tencent_authorized("10001", TencentLoginProvider.QQ) is True
+    assert "index verified" in dialog.status_label.text()
     assert "SECRET_TICKET" not in dialog.status_label.text()
     assert "SECRET_ACCESS_TOKEN" not in dialog.status_label.text()
     assert "10001" not in dialog.status_label.text()
+
+
+def test_tencent_account_dialog_confirmed_session_fails_when_index_missing(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "missing-index-account-login.png"
+
+    class MissingIndexStore(FakeAccountStore):
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return []
+
+    dialog = TencentAccountDialog(
+        provider=TencentLoginProvider.QQ,
+        account_store=MissingIndexStore(),
+        qr_output_path=output_path,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog._handle_login_session(
+        TencentSession(
+            uid="10001",
+            provider=TencentLoginProvider.QQ,
+            credentials={"access_token": "SECRET_ACCESS_TOKEN"},
+        )
+    )
+
+    assert dialog.uid() == ""
+    assert dialog.ok_button.isEnabled() is False
+    assert "index verification failed" in dialog.status_label.text()
+    assert "10001" not in dialog.status_label.text()
+    assert "SECRET_ACCESS_TOKEN" not in dialog.status_label.text()
+    assert "token" not in dialog.status_label.text().lower()
+    assert "cookie" not in dialog.status_label.text().lower()
 
 
 def test_tencent_account_dialog_mock_confirm_saves_local_session(
@@ -1294,8 +1333,42 @@ def test_tencent_account_dialog_mock_confirm_saves_local_session(
     assert output_path.read_bytes().startswith(b"\x89PNG")
     assert dialog.ok_button.isEnabled() is True
     assert "mock session saved" in dialog.status_label.text()
+    assert "index verified" in dialog.status_label.text()
     assert "local-wechat-user" not in dialog.status_label.text()
     assert "local-mock-only" not in dialog.status_label.text()
+    assert "token" not in dialog.status_label.text().lower()
+    assert "cookie" not in dialog.status_label.text().lower()
+
+
+def test_tencent_account_dialog_mock_confirm_fails_when_index_missing_after_save(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "missing-index-wechat-account-login.png"
+
+    class MissingIndexStore(FakeAccountStore):
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.WECHAT
+            return []
+
+    dialog = TencentAccountDialog(
+        provider=TencentLoginProvider.WECHAT,
+        account_store=MissingIndexStore(),
+        qr_output_path=output_path,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.mock_uid_input.setText("local-wechat-user")
+    dialog.mock_confirm_button.click()
+
+    assert output_path.exists() is False
+    assert dialog.uid() == ""
+    assert dialog.ok_button.isEnabled() is False
+    assert "index verification failed" in dialog.status_label.text()
+    assert "local-wechat-user" not in dialog.status_label.text()
     assert "token" not in dialog.status_label.text().lower()
     assert "cookie" not in dialog.status_label.text().lower()
 

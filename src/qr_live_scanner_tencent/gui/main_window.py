@@ -1022,6 +1022,37 @@ def _tencent_index_repair_result_contains(
     return any(entry.provider is provider and entry.uid == uid for entry in result.entries)
 
 
+def _save_tencent_session_with_index_verification(
+    account_store: AccountStore,
+    session: TencentSession,
+) -> None:
+    account_store.save_tencent_session(session, authorized=True)
+    if not _tencent_account_index_contains(
+        account_store,
+        session.uid,
+        session.provider,
+        authorized=True,
+    ):
+        msg = "index verification failed"
+        raise TencentAccountQRLoginError(msg)
+
+
+def _tencent_account_index_contains(
+    account_store: AccountStore,
+    uid: str,
+    provider: TencentLoginProvider,
+    *,
+    authorized: bool | None,
+) -> bool:
+    entries = account_store.list_tencent_sessions(provider)
+    return any(
+        entry.provider is provider
+        and entry.uid == uid
+        and (authorized is None or entry.authorized is authorized)
+        for entry in entries
+    )
+
+
 class _ManualTencentAccountDialog(QDialog):
     """首版腾讯账号占位授权对话框。
 
@@ -1279,7 +1310,7 @@ class TencentAccountDialog(QDialog):
             credentials={"mock_session": "local-mock-only"},
         )
         try:
-            self._account_store.save_tencent_session(session, authorized=True)
+            _save_tencent_session_with_index_verification(self._account_store, session)
         except AccountStoreError:
             with suppress(OSError):
                 self._qr_output_path.unlink(missing_ok=True)
@@ -1287,10 +1318,17 @@ class TencentAccountDialog(QDialog):
             self.ok_button.setEnabled(False)
             self.status_label.setText(ACCOUNT_STORE_ERROR_HINT)
             return
+        except TencentAccountQRLoginError as exc:
+            with suppress(OSError):
+                self._qr_output_path.unlink(missing_ok=True)
+            self._uid = ""
+            self.ok_button.setEnabled(False)
+            self.status_label.setText(str(exc))
+            return
 
         self._uid = uid
         self.ok_button.setEnabled(True)
-        self.status_label.setText("mock session saved")
+        self.status_label.setText("mock session saved; index verified")
         self.accept()
 
     def _write_dry_run_qr_image(self) -> None:
@@ -1327,14 +1365,20 @@ class TencentAccountDialog(QDialog):
             self._handle_login_failed()
             return
         try:
-            self._account_store.save_tencent_session(session, authorized=True)
+            _save_tencent_session_with_index_verification(self._account_store, session)
         except AccountStoreError:
             self.status_label.setText(ACCOUNT_STORE_ERROR_HINT)
             self._set_login_running(False)
             return
+        except TencentAccountQRLoginError as exc:
+            self._uid = ""
+            self.ok_button.setEnabled(False)
+            self.status_label.setText(str(exc))
+            self._set_login_running(False)
+            return
         self._uid = session.uid
         self.ok_button.setEnabled(True)
-        self.status_label.setText("Tencent account session saved")
+        self.status_label.setText("Tencent account session saved; index verified")
         self._set_login_running(False)
         self.accept()
 

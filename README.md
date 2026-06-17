@@ -123,6 +123,7 @@ qr-live-scanner-tencent gui --dry-run
 
 GUI 的 `Mock confirm` 也不会覆盖已有同 provider/UID 的 TencentSession；如需复用测试
 UID，请先删除该 provider/UID 的本地 session。
+GUI 保存 TencentSession 后同样会执行账号索引验证，防止账号表和本地索引状态脱节。
 
 如果已经先用 `tencent-login --mock-confirm` 在 CLI 保存过账号，可以在同一个
 登录渠道下从“账号管理”菜单进入“导入已保存账号”，输入本地测试账号 ID，将

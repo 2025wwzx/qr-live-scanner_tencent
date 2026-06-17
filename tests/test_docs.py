@@ -27,6 +27,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "`--mock-confirm` 默认不会覆盖已有同" in readme
     assert "provider/UID 的 TencentSession" in readme
     assert "GUI 的 `Mock confirm` 也不会覆盖已有同 provider/UID 的 TencentSession" in readme
+    assert "GUI 保存 TencentSession 后同样会执行账号索引验证" in readme
     assert "只检查本机 keyring 中已有的 TencentSession" in readme
     assert "本地账号索引" in readme
     assert "`tencent-status` 查询后回填本地账号索引" in readme
