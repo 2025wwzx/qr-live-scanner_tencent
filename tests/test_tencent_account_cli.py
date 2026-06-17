@@ -54,6 +54,7 @@ def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
 ) -> None:
     output_path = tmp_path / "wechat-login.png"
     saved: list[tuple[TencentSession, bool]] = []
+    operations: list[str] = []
 
     class FakeStore:
         def get_tencent_session(
@@ -63,11 +64,29 @@ def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
         ) -> TencentSession | None:
             assert uid == "local-wechat-user"
             assert provider is TencentLoginProvider.WECHAT
+            operations.append("get")
             return None
 
         def save_tencent_session(self, session: object, *, authorized: bool) -> None:
             assert isinstance(session, TencentSession)
+            operations.append("save")
             saved.append((session, authorized))
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.WECHAT
+            operations.append("list")
+            return [
+                TencentAccountIndexEntry(
+                    uid=session.uid,
+                    provider=session.provider,
+                    authorized=authorized,
+                )
+                for session, authorized in saved
+                if session.provider is provider
+            ]
 
     def fail_if_real_service_is_created(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("mock confirm must not create the real QR login service")
@@ -94,6 +113,7 @@ def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
     output = capsys.readouterr().out
 
     assert exit_code == 0
+    assert operations == ["get", "save", "list"]
     assert output_path.exists()
     assert output_path.read_bytes().startswith(b"\x89PNG")
     assert len(saved) == 1
@@ -103,8 +123,64 @@ def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
     assert session.credentials == {"mock_session": "local-mock-only"}
     assert authorized is True
     assert "mock Tencent account session saved" in output
+    assert "mock Tencent account index verified" in output
     assert "local-wechat-user" not in output
     assert "local-mock-only" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_login_cli_mock_confirm_fails_when_index_missing_after_save(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "missing-index-login.png"
+
+    class FakeStore:
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "local-qq-user"
+            assert provider is TencentLoginProvider.QQ
+            return None
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            assert session.uid == "local-qq-user"
+            assert authorized is True
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return []
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = _run_main(
+        [
+            "tencent-login",
+            "--provider",
+            "qq",
+            "--mock-confirm",
+            "--mock-uid",
+            "local-qq-user",
+            "--qr-output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert not output_path.exists()
+    assert "index verification failed" in output
+    assert "local-qq-user" not in output
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()
     assert "ticket" not in output.lower()
@@ -337,9 +413,28 @@ def test_tencent_login_cli_uses_local_protocol_config(
         )
 
     class FakeStore:
+        def __init__(self) -> None:
+            self.saved: list[tuple[TencentSession, bool]] = []
+
         def save_tencent_session(self, session: object, *, authorized: bool) -> None:
             assert isinstance(session, TencentSession)
             assert authorized is True
+            self.saved.append((session, authorized))
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return [
+                TencentAccountIndexEntry(
+                    uid=session.uid,
+                    provider=session.provider,
+                    authorized=authorized,
+                )
+                for session, authorized in self.saved
+                if session.provider is provider
+            ]
 
     monkeypatch.setattr(main_module, "_capture_tencent_session_from_qr", fake_capture)
     monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
@@ -505,6 +600,21 @@ def test_tencent_login_cli_scans_qr_and_saves_without_echoing_secrets(
             assert isinstance(session, TencentSession)
             saved.append((session, authorized))
 
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return [
+                TencentAccountIndexEntry(
+                    uid=session.uid,
+                    provider=session.provider,
+                    authorized=authorized,
+                )
+                for session, authorized in saved
+                if session.provider is provider
+            ]
+
     monkeypatch.setattr(
         main_module,
         "_new_tencent_account_qr_login_service",
@@ -539,6 +649,7 @@ def test_tencent_login_cli_scans_qr_and_saves_without_echoing_secrets(
     assert not (tmp_path / "tencent-login.png").exists()
     assert "Tencent account QR image written" in output
     assert "Tencent account session saved" in output
+    assert "Tencent account index verified" in output
     assert "10001" not in output
     assert "SECRET_TICKET" not in output
     assert "SECRET_ACCESS_TOKEN" not in output

@@ -691,7 +691,8 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
         if session.provider is not provider:
             msg = "Tencent account provider mismatch"
             raise TencentAccountQRLoginError(msg)
-        KeyringAccountStore().save_tencent_session(session, authorized=True)
+        store = KeyringAccountStore()
+        _save_tencent_session_with_index_verification(store, session)
     except AccountStoreError:
         print("[WARN] Tencent account QR login failed: credential storage unavailable")
         return 2
@@ -699,6 +700,7 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent account QR login failed: {exc}")
         return 2
     print("Tencent account session saved")
+    print("Tencent account index verified")
     return 0
 
 
@@ -728,21 +730,27 @@ def _run_tencent_login_mock_confirm(
         asyncio.run(service.aclose())
 
     try:
-        store.save_tencent_session(
+        _save_tencent_session_with_index_verification(
+            store,
             TencentSession(
                 uid=mock_uid,
                 provider=provider,
                 credentials={"mock_session": "local-mock-only"},
             ),
-            authorized=True,
         )
     except AccountStoreError:
         with suppress(OSError):
             qr_output_path.unlink(missing_ok=True)
         print("[WARN] mock Tencent account session failed: credential storage unavailable")
         return 2
+    except TencentAccountQRLoginError as exc:
+        with suppress(OSError):
+            qr_output_path.unlink(missing_ok=True)
+        print(f"[WARN] mock Tencent account session failed: {exc}")
+        return 1
     print(f"Tencent account QR mock image written: {qr_output_path}")
     print("mock Tencent account session saved")
+    print("mock Tencent account index verified")
     return 0
 
 
@@ -879,6 +887,21 @@ def _run_tencent_account_smoke(args: argparse.Namespace) -> int:
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _save_tencent_session_with_index_verification(
+    store: AccountStore,
+    session: TencentSession,
+) -> None:
+    store.save_tencent_session(session, authorized=True)
+    if not _tencent_account_index_contains(
+        store,
+        session.uid,
+        session.provider,
+        authorized=True,
+    ):
+        msg = "index verification failed"
+        raise TencentAccountQRLoginError(msg)
 
 
 def _tencent_account_index_contains(

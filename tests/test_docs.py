@@ -16,6 +16,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "mock TencentSession" in readme
     assert "tencent-account-smoke" in readme
     assert "账号索引验证" in readme
+    assert "保存 TencentSession 后会执行账号索引验证" in readme
     assert "tencent-list --provider wechat" in readme
     assert "tencent-repair-index --provider wechat" in readme
     assert "检查账号索引" in readme
