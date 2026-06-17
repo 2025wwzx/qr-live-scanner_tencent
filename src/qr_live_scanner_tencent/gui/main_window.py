@@ -313,6 +313,7 @@ class MainWindow(QMainWindow):
     def _build_menu_bar(self) -> None:
         account_menu = QMenu("账号管理", self)
         account_menu.addAction("新增账号", self._show_add_account_dialog)
+        account_menu.addAction("导入已保存账号", self._show_import_account_dialog)
         account_menu.addAction("删除账号", self._clear_selected_account)
         account_menu.addAction("设为默认账号", self._set_selected_account_as_default)
         account_menu.addAction("打开配置文件").setEnabled(False)
@@ -546,6 +547,30 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("账号未保存：UID 为空")
             return
         self._refresh_account_table_row(uid)
+
+    def _show_import_account_dialog(self) -> None:
+        provider = self._selected_provider()
+        dialog = ImportTencentAccountDialog(parent=self, provider=provider)
+        if dialog.exec() != int(QDialog.DialogCode.Accepted):
+            return
+        uid = dialog.uid()
+        if not uid:
+            self.statusBar().showMessage("账号未导入：UID 为空")
+            return
+        try:
+            session = self.account_store.get_tencent_session(uid, provider)
+        except AccountStoreError:
+            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
+        if session is None:
+            self.statusBar().showMessage("未找到本地已保存账号")
+            return
+        if session.provider is not provider:
+            self.statusBar().showMessage("本地账号 provider 不匹配")
+            return
+        self._refresh_account_table_row(uid)
+        if self._account_table_row(uid) >= 0:
+            self.statusBar().showMessage("本地已保存账号已导入")
 
     def _refresh_account_table_row(self, uid: str) -> None:
         provider = self._selected_provider()
@@ -896,6 +921,43 @@ class _ManualTencentAccountDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("账号标识"))
+        layout.addWidget(self.uid_input)
+        layout.addWidget(hint)
+        layout.addWidget(buttons)
+
+    def uid(self) -> str:
+        return self.uid_input.text().strip()
+
+
+class ImportTencentAccountDialog(QDialog):
+    """导入已存在于本地凭证存储中的腾讯账号索引。"""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> None:
+        super().__init__(parent)
+        self._provider = TencentLoginProvider(str(provider))
+        self.setWindowTitle("导入已保存账号")
+        self.uid_input = QLineEdit()
+        self.uid_input.setObjectName("import_uid_input")
+        self.uid_input.setPlaceholderText("已保存账号 UID")
+        hint = QLabel(
+            f"只导入本机已保存的 {self._provider.value} 账号索引；"
+            "不会读取或显示 Cookie、token、ticket 或二维码 payload。"
+        )
+        hint.setWordWrap(True)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("账号 UID"))
         layout.addWidget(self.uid_input)
         layout.addWidget(hint)
         layout.addWidget(buttons)

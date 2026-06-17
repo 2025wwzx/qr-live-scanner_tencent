@@ -235,7 +235,8 @@ def test_main_window_contains_core_controls(qtbot: QtBot) -> None:
     assert account_menu is not None
     assert isinstance(account_menu, QMenu)
     assert account_menu.actions()[0].text() == "新增账号"
-    assert account_menu.actions()[1].text() == "删除账号"
+    assert account_menu.actions()[1].text() == "导入已保存账号"
+    assert account_menu.actions()[2].text() == "删除账号"
     roi_menu = window.menuBar().actions()[1].menu()
     assert roi_menu is not None
     assert isinstance(roi_menu, QMenu)
@@ -522,6 +523,86 @@ def test_main_window_add_account_opens_qr_dialog_and_refreshes_account_table(
     assert window.auto_confirm_checkbox.isEnabled() is False
     assert window.authorization_state_label.text() == "账号授权：已授权 provider=qq"
     assert "真实 scan/confirm 已禁用" in window.protocol_gate_label.text()
+
+
+def test_main_window_imports_cli_saved_tencent_account_by_uid(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("cli-wechat-user", provider=TencentLoginProvider.WECHAT),
+        authorized=True,
+    )
+
+    class FakeImportTencentAccountDialog:
+        def __init__(self, **kwargs: object) -> None:
+            assert kwargs["provider"] is TencentLoginProvider.WECHAT
+            self._uid = "cli-wechat-user"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "ImportTencentAccountDialog",
+        FakeImportTencentAccountDialog,
+        raising=False,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window.provider_combo.setCurrentIndex(
+        window.provider_combo.findData(TencentLoginProvider.WECHAT.value)
+    )
+
+    window._show_import_account_dialog()
+
+    assert window.account_table.rowCount() == 1
+    uid_item = window.account_table.item(0, 0)
+    status_item = window.account_table.item(0, 1)
+    assert uid_item is not None
+    assert status_item is not None
+    assert uid_item.text() == "cli-wechat-user"
+    assert status_item.text() == "已保存"
+    assert window.authorization_state_label.text() == "账号授权：已授权 provider=wechat"
+    assert "本地已保存账号已导入" in window.statusBar().currentMessage()
+    assert "secret-token" not in window.statusBar().currentMessage()
+    assert "token" not in window.statusBar().currentMessage().lower()
+    assert "cookie" not in window.statusBar().currentMessage().lower()
+
+
+def test_main_window_import_account_redacts_storage_errors(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    class FakeImportTencentAccountDialog:
+        def __init__(self, **_kwargs: object) -> None:
+            self._uid = "10001"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "ImportTencentAccountDialog",
+        FakeImportTencentAccountDialog,
+        raising=False,
+    )
+    window = MainWindow(account_store=FailingAccountStore())
+    qtbot.addWidget(window)
+
+    window._show_import_account_dialog()
+
+    assert window.account_table.rowCount() == 0
+    assert window.statusBar().currentMessage() == "账号管理：请检查本机凭证存储配置"
+    assert "SECRET_TOKEN_VALUE" not in window.statusBar().currentMessage()
+    assert "10001" not in window.statusBar().currentMessage()
 
 
 def test_main_window_account_table_updates_rows_by_uid(qtbot: QtBot) -> None:

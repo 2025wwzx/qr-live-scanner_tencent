@@ -8,6 +8,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "qr-live-scanner-tencent gui --dry-run" in readme
     assert "账号管理" in readme
     assert "新增账号" in readme
+    assert "导入已保存账号" in readme
     assert "Mock confirm" in readme
     assert "Local mock UID" in readme
     assert "QQ/微信真实 HTTP 仍然禁用" in readme
