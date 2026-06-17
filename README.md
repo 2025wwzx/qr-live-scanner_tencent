@@ -69,6 +69,23 @@ qr-live-scanner-tencent tencent-status --provider qq --uid <local-account-id>
 `--mock-confirm` 只保存本地 mock session，用于验证 keyring、GUI 账号表和
 自动确认 gate；它不代表 QQ/微信真实扫码协议已验证。
 
+### GUI 本地 mock 账号测试
+
+用于先验证 QQ/微信账号信息保留、GUI 账号表刷新和 provider 隔离，不代表真实
+QQ/微信扫码登录已接通。QQ/微信真实 HTTP 仍然禁用。
+
+```powershell
+qr-live-scanner-tencent gui --dry-run
+```
+
+打开 GUI 后：
+
+1. 在“登录渠道”选择 QQ 或微信。
+2. 从“账号管理”菜单进入“新增账号”。
+3. 在 `Local mock UID` 输入本地测试账号 ID。
+4. 点击 `Mock confirm`。
+5. 回到主窗口后确认账号表出现该 UID，登录态显示为已保存。
+
 后续如果已经验证出 QQ/微信账号二维码登录协议参数，可以只把非敏感元数据放在本地
 TOML 中，再通过 `--protocol-config` 启用。不要把 Cookie、token、ticket、openid、
 UID、二维码 payload 或任何已签名 URL 写进配置文件。

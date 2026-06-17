@@ -962,8 +962,10 @@ class TencentAccountDialog(QDialog):
         self.demo_qr_button = QPushButton("Generate dry-run QR")
         self.demo_qr_button.clicked.connect(self._write_dry_run_qr)
         self.mock_uid_input = QLineEdit()
+        self.mock_uid_input.setObjectName("mock_uid_input")
         self.mock_uid_input.setPlaceholderText("Local mock UID")
         self.mock_confirm_button = QPushButton("Mock confirm")
+        self.mock_confirm_button.setObjectName("mock_confirm_button")
         self.mock_confirm_button.clicked.connect(self._mock_confirm_local_session)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)

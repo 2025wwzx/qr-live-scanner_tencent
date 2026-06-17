@@ -878,6 +878,17 @@ def test_tencent_account_dialog_mock_confirm_requires_uid_without_saving(
     assert "cookie" not in dialog.status_label.text().lower()
 
 
+def test_tencent_account_dialog_exposes_stable_mock_control_names(qtbot: QtBot) -> None:
+    dialog = TencentAccountDialog(provider=TencentLoginProvider.QQ)
+    qtbot.addWidget(dialog)
+
+    assert dialog.findChild(type(dialog.mock_uid_input), "mock_uid_input") is dialog.mock_uid_input
+    assert (
+        dialog.findChild(type(dialog.mock_confirm_button), "mock_confirm_button")
+        is dialog.mock_confirm_button
+    )
+
+
 def test_tencent_account_dialog_runs_login_in_background_and_shows_qr_preview(
     qtbot: QtBot,
     tmp_path: Path,
