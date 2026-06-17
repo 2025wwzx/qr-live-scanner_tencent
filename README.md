@@ -98,6 +98,11 @@ qr-live-scanner-tencent gui --dry-run
 该账号加入 GUI 账号列表。导入过程只检查本机 keyring 中已有的 TencentSession，
 不会显示或导出 Cookie、token、ticket、二维码 payload，也不会连接腾讯服务。
 
+也可以直接在 GUI 的“账号管理”菜单使用“本地账号自检”写入本地 mock
+TencentSession，用于验证账号表、provider 隔离和授权状态；如需复用测试 UID，
+使用“清理本地自检”删除该 provider/UID 的本地 session。两项操作都不会生成
+真实 QQ/微信二维码，也不会连接腾讯服务。
+
 如果只想先查看主窗口和账号弹窗外观，可以生成本地 PNG 快照：
 
 ```powershell

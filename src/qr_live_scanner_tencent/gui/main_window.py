@@ -314,8 +314,10 @@ class MainWindow(QMainWindow):
         account_menu = QMenu("账号管理", self)
         account_menu.addAction("新增账号", self._show_add_account_dialog)
         account_menu.addAction("导入已保存账号", self._show_import_account_dialog)
-        account_menu.addAction("删除账号", self._clear_selected_account)
         account_menu.addAction("设为默认账号", self._set_selected_account_as_default)
+        account_menu.addAction("删除账号", self._clear_selected_account)
+        account_menu.addAction("本地账号自检", self._run_tencent_account_smoke_dialog)
+        account_menu.addAction("清理本地自检", self._clear_tencent_account_smoke_dialog)
         account_menu.addAction("打开配置文件").setEnabled(False)
         roi_menu = QMenu("ROI设置", self)
         roi_menu.addAction("打开 ROI 设置", self._show_roi_dialog)
@@ -571,6 +573,58 @@ class MainWindow(QMainWindow):
         self._refresh_account_table_row(uid)
         if self._account_table_row(uid) >= 0:
             self.statusBar().showMessage("本地已保存账号已导入")
+
+    def _run_tencent_account_smoke_dialog(self) -> None:
+        provider = self._selected_provider()
+        dialog = TencentAccountSmokeDialog(parent=self, provider=provider)
+        if dialog.exec() != int(QDialog.DialogCode.Accepted):
+            return
+        uid = dialog.uid()
+        if not uid:
+            self.statusBar().showMessage("本地账号自检失败：UID 为空")
+            return
+        try:
+            if self.account_store.get_tencent_session(uid, provider) is not None:
+                self.statusBar().showMessage("本地账号自检失败：已存在同 provider/UID")
+                return
+            self.account_store.save_tencent_session(
+                TencentSession(
+                    uid=uid,
+                    provider=provider,
+                    credentials={"mock_session": "local-smoke-only"},
+                ),
+                authorized=True,
+            )
+        except AccountStoreError:
+            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
+        self._refresh_account_table_row(uid)
+        if self._account_table_row(uid) >= 0:
+            self.statusBar().showMessage("本地账号自检通过")
+
+    def _clear_tencent_account_smoke_dialog(self) -> None:
+        provider = self._selected_provider()
+        dialog = TencentAccountSmokeDialog(parent=self, provider=provider)
+        if dialog.exec() != int(QDialog.DialogCode.Accepted):
+            return
+        uid = dialog.uid()
+        if not uid:
+            self.statusBar().showMessage("本地账号清理失败：UID 为空")
+            return
+        try:
+            self.account_store.delete_tencent_session(uid, provider)
+        except AccountStoreError:
+            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
+        row = self._account_table_row(uid)
+        if row >= 0:
+            self.account_table.removeRow(row)
+        self._account_entries.pop((provider, uid), None)
+        self._sync_auto_confirm_availability()
+        self._sync_default_account_marks()
+        self._sync_selected_account_label()
+        self._save_state()
+        self.statusBar().showMessage("本地账号自检已清理")
 
     def _refresh_account_table_row(self, uid: str) -> None:
         provider = self._selected_provider()
@@ -946,8 +1000,9 @@ class ImportTencentAccountDialog(QDialog):
         self.uid_input.setPlaceholderText("已保存账号 UID")
         hint = QLabel(
             f"只导入本机已保存的 {self._provider.value} 账号索引；"
-            "不会读取或显示 Cookie、token、ticket 或二维码 payload。"
+            "不会显示或导出 Cookie、token、ticket 或二维码 payload。"
         )
+        hint.setObjectName("import_hint_label")
         hint.setWordWrap(True)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -958,6 +1013,44 @@ class ImportTencentAccountDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("账号 UID"))
+        layout.addWidget(self.uid_input)
+        layout.addWidget(hint)
+        layout.addWidget(buttons)
+
+    def uid(self) -> str:
+        return self.uid_input.text().strip()
+
+
+class TencentAccountSmokeDialog(QDialog):
+    """输入本地账号自检 UID 的轻量弹窗。"""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> None:
+        super().__init__(parent)
+        self._provider = TencentLoginProvider(str(provider))
+        self.setWindowTitle("本地账号自检")
+        self.uid_input = QLineEdit()
+        self.uid_input.setObjectName("smoke_uid_input")
+        self.uid_input.setPlaceholderText("本地自检 UID")
+        hint = QLabel(
+            f"只为 {self._provider.value} 写入本地 mock TencentSession；"
+            "不会生成真实 QQ/微信二维码，也不会连接腾讯服务。"
+        )
+        hint.setObjectName("smoke_hint_label")
+        hint.setWordWrap(True)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("自检 UID"))
         layout.addWidget(self.uid_input)
         layout.addWidget(hint)
         layout.addWidget(buttons)

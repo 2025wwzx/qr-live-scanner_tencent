@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtWidgets import QDialog, QGroupBox, QMenu
+from PySide6.QtWidgets import QDialog, QGroupBox, QLabel, QMenu
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
@@ -236,7 +236,10 @@ def test_main_window_contains_core_controls(qtbot: QtBot) -> None:
     assert isinstance(account_menu, QMenu)
     assert account_menu.actions()[0].text() == "新增账号"
     assert account_menu.actions()[1].text() == "导入已保存账号"
-    assert account_menu.actions()[2].text() == "删除账号"
+    assert account_menu.actions()[2].text() == "设为默认账号"
+    assert account_menu.actions()[3].text() == "删除账号"
+    assert account_menu.actions()[4].text() == "本地账号自检"
+    assert account_menu.actions()[5].text() == "清理本地自检"
     roi_menu = window.menuBar().actions()[1].menu()
     assert roi_menu is not None
     assert isinstance(roi_menu, QMenu)
@@ -286,6 +289,8 @@ def test_main_window_contains_core_controls(qtbot: QtBot) -> None:
     assert window.account_table.rowCount() == 0
     assert window.chrome_path_input.text() == ""
     assert "内置 Playwright Chromium" in window.chrome_path_input.placeholderText()
+    assert hasattr(window, "_run_tencent_account_smoke_dialog")
+    assert hasattr(window, "_clear_tencent_account_smoke_dialog")
 
 
 def test_main_window_enables_browser_fields_only_for_douyin(qtbot: QtBot) -> None:
@@ -603,6 +608,145 @@ def test_main_window_import_account_redacts_storage_errors(
     assert window.statusBar().currentMessage() == "账号管理：请检查本机凭证存储配置"
     assert "SECRET_TOKEN_VALUE" not in window.statusBar().currentMessage()
     assert "10001" not in window.statusBar().currentMessage()
+
+
+def test_import_tencent_account_dialog_redacts_sensitive_hint_text(qtbot: QtBot) -> None:
+    dialog = main_window_module.ImportTencentAccountDialog(provider=TencentLoginProvider.WECHAT)
+    qtbot.addWidget(dialog)
+    hint_label = dialog.findChild(QLabel, "import_hint_label")
+
+    assert hint_label is not None
+    assert "只导入本机已保存的 wechat 账号索引" in hint_label.text()
+    assert "不会显示或导出 Cookie、token、ticket 或二维码 payload" in hint_label.text()
+
+
+def test_main_window_local_account_smoke_saves_mock_session_without_http(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    store = FakeAccountStore()
+
+    class FakeTencentAccountSmokeDialog:
+        def __init__(self, **kwargs: object) -> None:
+            assert kwargs["provider"] is TencentLoginProvider.WECHAT
+            self._uid = "gui-wechat-smoke"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "TencentAccountSmokeDialog",
+        FakeTencentAccountSmokeDialog,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window.provider_combo.setCurrentIndex(
+        window.provider_combo.findData(TencentLoginProvider.WECHAT.value)
+    )
+
+    window._run_tencent_account_smoke_dialog()
+
+    session = store.get_tencent_session("gui-wechat-smoke", TencentLoginProvider.WECHAT)
+    assert session is not None
+    assert session.provider is TencentLoginProvider.WECHAT
+    assert session.credentials == {"mock_session": "local-smoke-only"}
+    assert store.is_tencent_authorized("gui-wechat-smoke", TencentLoginProvider.WECHAT) is True
+    assert window.account_table.rowCount() == 1
+    uid_item = window.account_table.item(0, 0)
+    status_item = window.account_table.item(0, 1)
+    assert uid_item is not None
+    assert status_item is not None
+    assert uid_item.text() == "gui-wechat-smoke"
+    assert status_item.text() == "已保存"
+    assert "本地账号自检通过" in window.statusBar().currentMessage()
+    assert "local-smoke-only" not in window.statusBar().currentMessage()
+    assert "token" not in window.statusBar().currentMessage().lower()
+    assert "cookie" not in window.statusBar().currentMessage().lower()
+
+
+def test_main_window_local_account_smoke_does_not_overwrite_existing_session(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("existing-user", "SECRET_ACCESS_TOKEN"),
+        authorized=True,
+    )
+
+    class FakeTencentAccountSmokeDialog:
+        def __init__(self, **_kwargs: object) -> None:
+            self._uid = "existing-user"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "TencentAccountSmokeDialog",
+        FakeTencentAccountSmokeDialog,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+
+    window._run_tencent_account_smoke_dialog()
+
+    session = store.get_tencent_session("existing-user", TencentLoginProvider.QQ)
+    assert session is not None
+    assert session.credentials == {"access_token": "SECRET_ACCESS_TOKEN"}
+    assert window.account_table.rowCount() == 0
+    assert "已存在同 provider/UID" in window.statusBar().currentMessage()
+    assert "SECRET_ACCESS_TOKEN" not in window.statusBar().currentMessage()
+    assert "existing-user" not in window.statusBar().currentMessage()
+
+
+def test_main_window_local_account_smoke_cleanup_removes_mock_session(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        TencentSession(
+            uid="gui-smoke-cleanup",
+            provider=TencentLoginProvider.QQ,
+            credentials={"mock_session": "local-smoke-only"},
+        ),
+        authorized=True,
+    )
+
+    class FakeTencentAccountSmokeDialog:
+        def __init__(self, **_kwargs: object) -> None:
+            self._uid = "gui-smoke-cleanup"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "TencentAccountSmokeDialog",
+        FakeTencentAccountSmokeDialog,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window._refresh_account_table_row("gui-smoke-cleanup")
+
+    window._clear_tencent_account_smoke_dialog()
+
+    assert store.get_tencent_session("gui-smoke-cleanup", TencentLoginProvider.QQ) is None
+    assert store.is_tencent_authorized("gui-smoke-cleanup", TencentLoginProvider.QQ) is False
+    assert window.account_table.rowCount() == 0
+    assert "本地账号自检已清理" in window.statusBar().currentMessage()
+    assert "local-smoke-only" not in window.statusBar().currentMessage()
 
 
 def test_main_window_account_table_updates_rows_by_uid(qtbot: QtBot) -> None:
