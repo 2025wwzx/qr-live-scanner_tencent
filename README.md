@@ -76,6 +76,23 @@ qr-live-scanner-tencent tencent-account-smoke --provider wechat --uid local-wech
 适合快速确认 QQ/微信账号信息保留链路。它默认不会覆盖已有同 provider/UID 的
 TencentSession；如果要复用测试 UID，请先运行 `tencent-delete` 清理。
 
+### 完整本地账号保留测试
+
+下面这条链路只写入本机 keyring 和 GUI 状态，不连接腾讯服务，也不会生成真实
+QQ/微信登录二维码。为了让 GUI 能导入已保存账号，保存步骤不要加 `--cleanup`：
+
+```powershell
+qr-live-scanner-tencent tencent-login --provider wechat --mock-confirm --mock-uid local-wechat-user --qr-output work/tencent-login-qr.png
+qr-live-scanner-tencent tencent-status --provider wechat --uid local-wechat-user
+qr-live-scanner-tencent gui --dry-run
+qr-live-scanner-tencent tencent-delete --provider wechat --uid local-wechat-user
+```
+
+手动打开 GUI 后，在同一个登录渠道选择“账号管理” -> “导入已保存账号”，输入
+`local-wechat-user`，确认账号表出现该 UID 且登录态为“已保存”。测试结束后用
+`tencent-delete` 清理同 provider/UID 的本地 session；命令输出不会显示 UID、
+Cookie、token、ticket 或二维码 payload。
+
 ### GUI 本地 mock 账号测试
 
 用于先验证 QQ/微信账号信息保留、GUI 账号表刷新和 provider 隔离，不代表真实

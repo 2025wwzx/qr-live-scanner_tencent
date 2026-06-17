@@ -25,3 +25,13 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "work/gui-snapshots" in readme
     assert "tencent-account-import-dialog" in readme
     assert "tencent-account-smoke-dialog" in readme
+    assert "完整本地账号保留测试" in readme
+    assert "不要加 `--cleanup`" in readme
+    assert (
+        "qr-live-scanner-tencent tencent-status --provider wechat --uid local-wechat-user"
+        in readme
+    )
+    assert (
+        "qr-live-scanner-tencent tencent-delete --provider wechat --uid local-wechat-user"
+        in readme
+    )
