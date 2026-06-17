@@ -612,6 +612,13 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("本地账号清理失败：UID 为空")
             return
         try:
+            session = self.account_store.get_tencent_session(uid, provider)
+            if session is None:
+                self.statusBar().showMessage("本地账号清理失败：未找到自检账号")
+                return
+            if session.credentials != {"mock_session": "local-smoke-only"}:
+                self.statusBar().showMessage("本地账号清理失败：只清理本地自检账号")
+                return
             self.account_store.delete_tencent_session(uid, provider)
         except AccountStoreError:
             self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)

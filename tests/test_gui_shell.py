@@ -749,6 +749,46 @@ def test_main_window_local_account_smoke_cleanup_removes_mock_session(
     assert "local-smoke-only" not in window.statusBar().currentMessage()
 
 
+def test_main_window_local_account_smoke_cleanup_refuses_non_smoke_session(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("real-user", "SECRET_ACCESS_TOKEN"),
+        authorized=True,
+    )
+
+    class FakeTencentAccountSmokeDialog:
+        def __init__(self, **_kwargs: object) -> None:
+            self._uid = "real-user"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "TencentAccountSmokeDialog",
+        FakeTencentAccountSmokeDialog,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window._refresh_account_table_row("real-user")
+
+    window._clear_tencent_account_smoke_dialog()
+
+    session = store.get_tencent_session("real-user", TencentLoginProvider.QQ)
+    assert session is not None
+    assert session.credentials == {"access_token": "SECRET_ACCESS_TOKEN"}
+    assert window.account_table.rowCount() == 1
+    assert "只清理本地自检账号" in window.statusBar().currentMessage()
+    assert "SECRET_ACCESS_TOKEN" not in window.statusBar().currentMessage()
+    assert "real-user" not in window.statusBar().currentMessage()
+
+
 def test_main_window_account_table_updates_rows_by_uid(qtbot: QtBot) -> None:
     store = FakeAccountStore()
     store.save_tencent_session(
