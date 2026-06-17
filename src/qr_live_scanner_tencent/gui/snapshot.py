@@ -74,7 +74,7 @@ def write_gui_snapshots(
     )
     if normalized_mock_uid:
         account_dialog.mock_uid_input.setText(normalized_mock_uid)
-        account_dialog._mock_confirm_local_session()
+        account_dialog._write_dry_run_qr_image()
     account_dialog.resize(360, 460)
 
     import_dialog = ImportTencentAccountDialog(provider=normalized_provider)

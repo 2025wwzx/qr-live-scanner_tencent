@@ -17,6 +17,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "默认不会覆盖已有同 provider/UID 的" in readme
     assert "`--mock-confirm` 默认不会覆盖已有同" in readme
     assert "provider/UID 的 TencentSession" in readme
+    assert "GUI 的 `Mock confirm` 也不会覆盖已有同 provider/UID 的 TencentSession" in readme
     assert "只检查本机 keyring 中已有的 TencentSession" in readme
     assert "不会显示或导出 Cookie、token、ticket、二维码 payload" in readme
     assert "Mock confirm" in readme

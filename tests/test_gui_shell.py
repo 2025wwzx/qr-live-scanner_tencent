@@ -1118,6 +1118,68 @@ def test_tencent_account_dialog_mock_confirm_saves_local_session(
     assert "cookie" not in dialog.status_label.text().lower()
 
 
+def test_tencent_account_dialog_mock_confirm_does_not_overwrite_existing_session(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "wechat-account-login.png"
+    operations: list[str] = []
+
+    class GuardedStore(FakeAccountStore):
+        def __init__(self) -> None:
+            super().__init__()
+            FakeAccountStore.save_tencent_session(
+                self,
+                TencentSession(
+                    uid="local-wechat-user",
+                    provider=TencentLoginProvider.WECHAT,
+                    credentials={"access_token": "SECRET_ACCESS_TOKEN"},
+                ),
+                authorized=True,
+            )
+
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "local-wechat-user"
+            assert provider is TencentLoginProvider.WECHAT
+            operations.append("get")
+            return super().get_tencent_session(uid, provider)
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            raise AssertionError("existing Tencent session must not be overwritten")
+
+    store = GuardedStore()
+    dialog = TencentAccountDialog(
+        provider=TencentLoginProvider.WECHAT,
+        account_store=store,
+        qr_output_path=output_path,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.mock_uid_input.setText("local-wechat-user")
+    dialog.mock_confirm_button.click()
+
+    assert operations == ["get"]
+    session = FakeAccountStore.get_tencent_session(
+        store,
+        "local-wechat-user",
+        TencentLoginProvider.WECHAT,
+    )
+    assert session is not None
+    assert session.credentials == {"access_token": "SECRET_ACCESS_TOKEN"}
+    assert output_path.exists() is False
+    assert dialog.uid() == ""
+    assert dialog.ok_button.isEnabled() is False
+    assert "already exists" in dialog.status_label.text()
+    assert "local-wechat-user" not in dialog.status_label.text()
+    assert "SECRET_ACCESS_TOKEN" not in dialog.status_label.text()
+    assert "token" not in dialog.status_label.text().lower()
+    assert "cookie" not in dialog.status_label.text().lower()
+
+
 def test_tencent_account_dialog_mock_confirm_requires_uid_without_saving(
     qtbot: QtBot,
     tmp_path: Path,

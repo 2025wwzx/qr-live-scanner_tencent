@@ -111,6 +111,9 @@ qr-live-scanner-tencent gui --dry-run
 4. 点击 `Mock confirm`。
 5. 回到主窗口后确认账号表出现该 UID，登录态显示为已保存。
 
+GUI 的 `Mock confirm` 也不会覆盖已有同 provider/UID 的 TencentSession；如需复用测试
+UID，请先删除该 provider/UID 的本地 session。
+
 如果已经先用 `tencent-login --mock-confirm` 在 CLI 保存过账号，可以在同一个
 登录渠道下从“账号管理”菜单进入“导入已保存账号”，输入本地测试账号 ID，将
 该账号加入 GUI 账号列表。导入过程只检查本机 keyring 中已有的 TencentSession，

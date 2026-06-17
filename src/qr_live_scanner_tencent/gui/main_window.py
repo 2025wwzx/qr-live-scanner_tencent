@@ -1197,6 +1197,18 @@ class TencentAccountDialog(QDialog):
             self.status_label.setText("Mock UID is required")
             return
 
+        try:
+            if self._account_store.get_tencent_session(uid, self._provider) is not None:
+                self._uid = ""
+                self.ok_button.setEnabled(False)
+                self.status_label.setText("mock session already exists")
+                return
+        except AccountStoreError:
+            self._uid = ""
+            self.ok_button.setEnabled(False)
+            self.status_label.setText(ACCOUNT_STORE_ERROR_HINT)
+            return
+
         self._write_dry_run_qr_image()
         session = TencentSession(
             uid=uid,
