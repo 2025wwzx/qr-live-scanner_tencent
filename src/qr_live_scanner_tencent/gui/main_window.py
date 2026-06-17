@@ -961,6 +961,10 @@ class TencentAccountDialog(QDialog):
 
         self.demo_qr_button = QPushButton("Generate dry-run QR")
         self.demo_qr_button.clicked.connect(self._write_dry_run_qr)
+        self.mock_uid_input = QLineEdit()
+        self.mock_uid_input.setPlaceholderText("Local mock UID")
+        self.mock_confirm_button = QPushButton("Mock confirm")
+        self.mock_confirm_button.clicked.connect(self._mock_confirm_local_session)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         self.ok_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
@@ -974,6 +978,10 @@ class TencentAccountDialog(QDialog):
         login_buttons.addWidget(self.cancel_login_button)
         login_buttons.addWidget(self.demo_qr_button)
         layout.addLayout(login_buttons)
+        mock_buttons = QHBoxLayout()
+        mock_buttons.addWidget(self.mock_uid_input)
+        mock_buttons.addWidget(self.mock_confirm_button)
+        layout.addLayout(mock_buttons)
         layout.addWidget(self.qr_preview_label)
         layout.addWidget(self.qr_path_label)
         layout.addWidget(self.status_label)
@@ -1014,6 +1022,37 @@ class TencentAccountDialog(QDialog):
         self._login_worker.cancel()
 
     def _write_dry_run_qr(self) -> None:
+        self._write_dry_run_qr_image()
+        self.status_label.setText("Dry-run QR image generated")
+
+    def _mock_confirm_local_session(self) -> None:
+        uid = self.mock_uid_input.text().strip()
+        if not uid:
+            self._uid = ""
+            self.ok_button.setEnabled(False)
+            self.status_label.setText("Mock UID is required")
+            return
+
+        self._write_dry_run_qr_image()
+        session = TencentSession(
+            uid=uid,
+            provider=self._provider,
+            credentials={"mock_session": "local-mock-only"},
+        )
+        try:
+            self._account_store.save_tencent_session(session, authorized=True)
+        except AccountStoreError:
+            self._uid = ""
+            self.ok_button.setEnabled(False)
+            self.status_label.setText(ACCOUNT_STORE_ERROR_HINT)
+            return
+
+        self._uid = uid
+        self.ok_button.setEnabled(True)
+        self.status_label.setText("mock session saved")
+        self.accept()
+
+    def _write_dry_run_qr_image(self) -> None:
         service = TencentAccountQRLoginService.dry_run(
             provider=self._provider,
             device_id_store=LocalDeviceIdStore.default(),
@@ -1022,7 +1061,6 @@ class TencentAccountDialog(QDialog):
             ticket = service.dry_run_ticket()
             service.write_qr_png(ticket, self._qr_output_path)
             self._handle_qr_ready(str(self._qr_output_path))
-            self.status_label.setText("Dry-run QR image generated")
         finally:
             asyncio.run(service.aclose())
 
@@ -1075,6 +1113,8 @@ class TencentAccountDialog(QDialog):
     def _set_login_running(self, running: bool) -> None:
         self.start_login_button.setEnabled(not running)
         self.demo_qr_button.setEnabled(not running)
+        self.mock_uid_input.setEnabled(not running)
+        self.mock_confirm_button.setEnabled(not running)
         self.cancel_login_button.setEnabled(running)
 
 

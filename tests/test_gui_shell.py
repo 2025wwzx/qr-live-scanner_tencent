@@ -820,6 +820,64 @@ def test_tencent_account_dialog_generates_qr_and_saves_confirmed_session(
     assert "10001" not in dialog.status_label.text()
 
 
+def test_tencent_account_dialog_mock_confirm_saves_local_session(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    store = FakeAccountStore()
+    output_path = tmp_path / "wechat-account-login.png"
+
+    dialog = TencentAccountDialog(
+        provider=TencentLoginProvider.WECHAT,
+        account_store=store,
+        qr_output_path=output_path,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.mock_uid_input.setText("local-wechat-user")
+    dialog.mock_confirm_button.click()
+
+    session = store.get_tencent_session("local-wechat-user", TencentLoginProvider.WECHAT)
+    assert session is not None
+    assert session.provider is TencentLoginProvider.WECHAT
+    assert session.credentials == {"mock_session": "local-mock-only"}
+    assert store.is_tencent_authorized("local-wechat-user", TencentLoginProvider.WECHAT) is True
+    assert dialog.uid() == "local-wechat-user"
+    assert output_path.exists()
+    assert output_path.read_bytes().startswith(b"\x89PNG")
+    assert dialog.ok_button.isEnabled() is True
+    assert "mock session saved" in dialog.status_label.text()
+    assert "local-wechat-user" not in dialog.status_label.text()
+    assert "local-mock-only" not in dialog.status_label.text()
+    assert "token" not in dialog.status_label.text().lower()
+    assert "cookie" not in dialog.status_label.text().lower()
+
+
+def test_tencent_account_dialog_mock_confirm_requires_uid_without_saving(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    store = FakeAccountStore()
+    output_path = tmp_path / "qq-account-login.png"
+
+    dialog = TencentAccountDialog(
+        provider=TencentLoginProvider.QQ,
+        account_store=store,
+        qr_output_path=output_path,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.mock_confirm_button.click()
+
+    assert dialog.uid() == ""
+    assert output_path.exists() is False
+    assert dialog.ok_button.isEnabled() is False
+    assert store.get_tencent_session("local-user", TencentLoginProvider.QQ) is None
+    assert "Mock UID is required" in dialog.status_label.text()
+    assert "token" not in dialog.status_label.text().lower()
+    assert "cookie" not in dialog.status_label.text().lower()
+
+
 def test_tencent_account_dialog_runs_login_in_background_and_shows_qr_preview(
     qtbot: QtBot,
     tmp_path: Path,
