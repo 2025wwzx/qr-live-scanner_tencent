@@ -91,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_gui_snapshot(args)
     if args.command == "tencent-login":
         return _run_tencent_login(args)
+    if args.command == "tencent-list":
+        return _run_tencent_list(args)
     if args.command == "tencent-status":
         return _run_tencent_status(args)
     if args.command == "tencent-delete":
@@ -188,6 +190,13 @@ def _build_parser() -> argparse.ArgumentParser:
     tencent_login_parser.add_argument("--protocol-config")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
+
+    tencent_list_parser = subparsers.add_parser("tencent-list")
+    tencent_list_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
 
     tencent_status_parser = subparsers.add_parser("tencent-status")
     tencent_status_parser.add_argument(
@@ -723,6 +732,23 @@ def _run_tencent_login_mock_confirm(
         return 2
     print(f"Tencent account QR mock image written: {qr_output_path}")
     print("mock Tencent account session saved")
+    return 0
+
+
+def _run_tencent_list(args: argparse.Namespace) -> int:
+    try:
+        provider = TencentLoginProvider(str(args.provider))
+        entries = KeyringAccountStore().list_tencent_sessions(provider)
+    except AccountStoreError:
+        print("[WARN] Tencent account list failed: credential storage unavailable")
+        return 2
+    except ValueError as exc:
+        print(f"[WARN] Tencent account list failed: {exc}")
+        return 2
+    print(f"Tencent account sessions: {len(entries)}")
+    for index, entry in enumerate(entries, start=1):
+        authorized = "yes" if entry.authorized else "no"
+        print(f"#{index} provider={entry.provider.value} authorized={authorized}")
     return 0
 
 

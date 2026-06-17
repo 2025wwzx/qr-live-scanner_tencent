@@ -11,7 +11,11 @@ from qr_live_scanner_tencent.accounts.tencent_qr_login import (
     TencentAccountQRLoginStatus,
     TencentAccountQRTicket,
 )
-from qr_live_scanner_tencent.interfaces import AccountStoreError, TencentLoginProvider
+from qr_live_scanner_tencent.interfaces import (
+    AccountStoreError,
+    TencentAccountIndexEntry,
+    TencentLoginProvider,
+)
 
 
 def test_tencent_login_cli_dry_run_writes_demo_qr_without_echoing_secrets(
@@ -657,6 +661,69 @@ def test_tencent_status_cli_reports_saved_authorized_without_echoing_secrets(
     assert "10001" not in output
     assert "SECRET_ACCESS_TOKEN" not in output
     assert "SECRET_OPENID" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+
+
+def test_tencent_list_cli_reports_index_without_echoing_identifiers(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return [
+                TencentAccountIndexEntry(
+                    uid="10001",
+                    provider=TencentLoginProvider.QQ,
+                    authorized=True,
+                ),
+                TencentAccountIndexEntry(
+                    uid="10002",
+                    provider=TencentLoginProvider.QQ,
+                    authorized=False,
+                ),
+            ]
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = _run_main(["tencent-list", "--provider", "qq"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent account sessions: 2" in output
+    assert "#1 provider=qq authorized=yes" in output
+    assert "#2 provider=qq authorized=no" in output
+    assert "10001" not in output
+    assert "10002" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_list_cli_redacts_storage_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            raise AccountStoreError("SECRET_ACCESS_TOKEN should not be visible")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = _run_main(["tencent-list", "--provider", "qq"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "credential storage unavailable" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()
 

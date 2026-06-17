@@ -63,6 +63,7 @@ namespace。当前真实 QQ/微信协议参数仍未验证，默认只允许 `--
 ```powershell
 qr-live-scanner-tencent tencent-login --provider qq --dry-run --qr-output work/tencent-login-qr.png
 qr-live-scanner-tencent tencent-login --provider wechat --mock-confirm --mock-uid local-wechat-user --qr-output work/tencent-login-qr.png
+qr-live-scanner-tencent tencent-list --provider wechat
 qr-live-scanner-tencent tencent-status --provider qq --uid <local-account-id>
 qr-live-scanner-tencent tencent-delete --provider qq --uid <local-account-id>
 qr-live-scanner-tencent tencent-account-smoke --provider wechat --uid local-wechat-user --cleanup
@@ -71,6 +72,8 @@ qr-live-scanner-tencent tencent-account-smoke --provider wechat --uid local-wech
 `--mock-confirm` 只保存本地 mock session，用于验证 keyring、GUI 账号表和
 自动确认 gate；它不代表 QQ/微信真实扫码协议已验证。`--mock-confirm` 默认不会覆盖已有同
 provider/UID 的 TencentSession；如果要复用测试 UID，请先运行 `tencent-delete` 清理。
+`tencent-list` 只读取本地账号索引，用于确认当前 provider 下保存了多少本地账号；
+输出只包含序号、provider 和授权状态，不显示 UID、Cookie、token、ticket 或二维码 payload。
 `tencent-delete` 只清除本地保存的 TencentSession 和授权标记，不连接腾讯服务，
 也不会输出账号 ID、Cookie、token、ticket 或二维码 payload。
 `tencent-account-smoke` 只做本地保存、查询和可选清理，不创建真实 QR 登录服务，
