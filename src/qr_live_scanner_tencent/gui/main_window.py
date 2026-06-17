@@ -996,6 +996,9 @@ class TencentAccountDialog(QDialog):
         if not isinstance(session, TencentSession):
             self._handle_login_failed()
             return
+        if session.provider is not self._provider:
+            self._handle_login_failed()
+            return
         try:
             self._account_store.save_tencent_session(session, authorized=True)
         except AccountStoreError:
