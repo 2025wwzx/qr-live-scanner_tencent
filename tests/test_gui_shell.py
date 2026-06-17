@@ -1180,6 +1180,49 @@ def test_tencent_account_dialog_mock_confirm_does_not_overwrite_existing_session
     assert "cookie" not in dialog.status_label.text().lower()
 
 
+def test_tencent_account_dialog_mock_confirm_removes_qr_when_save_fails(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "failed-save-wechat-account-login.png"
+
+    class FailingSaveStore(FailingAccountStore):
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "local-wechat-user"
+            assert provider is TencentLoginProvider.WECHAT
+            return None
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            assert authorized is True
+            raise AccountStoreError("SECRET_ACCESS_TOKEN should not be visible")
+
+    dialog = TencentAccountDialog(
+        provider=TencentLoginProvider.WECHAT,
+        account_store=FailingSaveStore(),
+        qr_output_path=output_path,
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.mock_uid_input.setText("local-wechat-user")
+    dialog.mock_confirm_button.click()
+
+    assert output_path.exists() is False
+    assert dialog.uid() == ""
+    assert dialog.ok_button.isEnabled() is False
+    assert dialog.status_label.text() == main_window_module.ACCOUNT_STORE_ERROR_HINT
+    assert "SECRET_ACCESS_TOKEN" not in dialog.status_label.text()
+    assert "local-wechat-user" not in dialog.status_label.text()
+    assert "token" not in dialog.status_label.text().lower()
+    assert "cookie" not in dialog.status_label.text().lower()
+    assert "ticket" not in dialog.status_label.text().lower()
+    assert "payload" not in dialog.status_label.text().lower()
+
+
 def test_tencent_account_dialog_mock_confirm_requires_uid_without_saving(
     qtbot: QtBot,
     tmp_path: Path,

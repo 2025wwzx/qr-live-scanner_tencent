@@ -1218,6 +1218,8 @@ class TencentAccountDialog(QDialog):
         try:
             self._account_store.save_tencent_session(session, authorized=True)
         except AccountStoreError:
+            with suppress(OSError):
+                self._qr_output_path.unlink(missing_ok=True)
             self._uid = ""
             self.ok_button.setEnabled(False)
             self.status_label.setText(ACCOUNT_STORE_ERROR_HINT)
