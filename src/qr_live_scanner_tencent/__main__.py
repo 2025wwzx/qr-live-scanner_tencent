@@ -749,6 +749,9 @@ def _run_tencent_account_smoke(args: argparse.Namespace) -> int:
         provider = TencentLoginProvider(str(args.provider))
         uid = _required_text(args.uid, "uid")
         store = KeyringAccountStore()
+        if store.get_tencent_session(uid, provider) is not None:
+            print("[WARN] Tencent account local smoke failed: session already exists")
+            return 1
         store.save_tencent_session(
             TencentSession(
                 uid=uid,

@@ -633,7 +633,7 @@ def test_tencent_account_smoke_cli_saves_verifies_and_cleans_up_without_http(
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert operations == ["save", "get", "authorized", "delete"]
+    assert operations == ["get", "save", "get", "authorized", "delete"]
     assert fake_store.sessions == {}
     assert fake_store.authorized == set()
     assert "Tencent account local smoke passed" in output
@@ -651,10 +651,17 @@ def test_tencent_account_smoke_cli_redacts_storage_errors(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     class FakeStore:
-        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
-            assert isinstance(session, TencentSession)
-            assert authorized is True
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "10001"
+            assert provider is TencentLoginProvider.QQ
             raise AccountStoreError("SECRET_ACCESS_TOKEN should not be visible")
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            raise AssertionError("save should not run after preflight storage failure")
 
     monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
 
@@ -665,6 +672,44 @@ def test_tencent_account_smoke_cli_redacts_storage_errors(
     assert "credential storage unavailable" in output
     assert "SECRET_ACCESS_TOKEN" not in output
     assert "10001" not in output
+
+
+def test_tencent_account_smoke_cli_does_not_overwrite_existing_session(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    operations: list[str] = []
+
+    class FakeStore:
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "10001"
+            assert provider is TencentLoginProvider.QQ
+            operations.append("get")
+            return TencentSession(
+                uid=uid,
+                provider=provider,
+                credentials={"access_token": "SECRET_ACCESS_TOKEN"},
+            )
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            raise AssertionError("existing Tencent session must not be overwritten")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-account-smoke", "--provider", "qq", "--uid", "10001"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert operations == ["get"]
+    assert "already exists" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "10001" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
 
 
 async def test_tencent_login_cli_closes_service_when_qr_fetch_fails(tmp_path: Path) -> None:
