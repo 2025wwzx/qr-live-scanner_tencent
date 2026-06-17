@@ -163,6 +163,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     gui_snapshot_parser = subparsers.add_parser("gui-snapshot")
     gui_snapshot_parser.add_argument("--output-dir", default="work/gui-snapshots")
+    gui_snapshot_parser.add_argument("--mock-uid")
     gui_snapshot_parser.add_argument(
         "--provider",
         choices=[provider.value for provider in TencentLoginProvider],
@@ -592,12 +593,15 @@ def _run_gui_snapshot(args: argparse.Namespace) -> int:
         paths = write_gui_snapshots(
             Path(str(args.output_dir)),
             provider=TencentLoginProvider(str(args.provider)),
+            mock_uid=_optional_text(args.mock_uid) or "",
         )
     except RuntimeError as exc:
         print(f"[WARN] {exc}")
         return 2
     for path in paths:
         print(f"GUI snapshot written: {path}")
+    if _optional_text(args.mock_uid):
+        print("GUI mock account snapshot rendered")
     return 0
 
 

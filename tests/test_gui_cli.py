@@ -58,3 +58,34 @@ def test_gui_snapshot_cli_writes_visual_pngs(
         "SimSun",
         "NSimSun",
     }
+
+
+def test_gui_snapshot_cli_can_render_mock_account_state(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "mock-account-snapshots"
+
+    exit_code = main(
+        [
+            "gui-snapshot",
+            "--provider",
+            "wechat",
+            "--mock-uid",
+            "local-wechat-user",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert (output_dir / "main-window.png").read_bytes().startswith(b"\x89PNG")
+    assert (output_dir / "tencent-account-dialog-wechat.png").read_bytes().startswith(b"\x89PNG")
+    assert (output_dir / "tencent-account-dialog-wechat-qr.png").read_bytes().startswith(b"\x89PNG")
+    assert "mock account snapshot rendered" in output
+    assert "local-wechat-user" not in output
+    assert "local-mock-only" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "payload" not in output.lower()

@@ -90,10 +90,12 @@ qr-live-scanner-tencent gui --dry-run
 
 ```powershell
 qr-live-scanner-tencent gui-snapshot --provider wechat --output-dir work/gui-snapshots
+qr-live-scanner-tencent gui-snapshot --provider wechat --mock-uid local-wechat-user --output-dir work/gui-snapshots
 ```
 
 该命令会写入 `work/gui-snapshots`，只做离屏渲染，不连接直播平台、不访问
-keyring，也不发送 QQ/微信真实 HTTP。
+keyring，也不发送 QQ/微信真实 HTTP。带 `--mock-uid` 时只在内存里的 fake store
+渲染“账号已保存”状态，不会保存真实凭证。
 
 后续如果已经验证出 QQ/微信账号二维码登录协议参数，可以只把非敏感元数据放在本地
 TOML 中，再通过 `--protocol-config` 启用。不要把 Cookie、token、ticket、openid、
