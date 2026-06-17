@@ -22,6 +22,7 @@ class GuiAccountEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     uid: str
+    provider: TencentLoginProvider = TencentLoginProvider.QQ
     display_name: str = ""
 
     @field_validator("uid", "display_name")
@@ -54,6 +55,7 @@ class GuiState(BaseModel):
     auto_exit: bool = False
     demo_mode: bool = False
     default_uid: str = ""
+    default_provider: TencentLoginProvider = TencentLoginProvider.QQ
     accounts: list[GuiAccountEntry] = Field(default_factory=list)
 
     @field_validator("platform")

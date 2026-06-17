@@ -22,6 +22,7 @@ from qr_live_scanner_tencent.gui.monitor import (
     DecodeOnlyMonitorRequest,
     DecodeOnlyMonitorSnapshot,
 )
+from qr_live_scanner_tencent.gui.state import GuiAccountEntry, GuiState, save_gui_state
 from qr_live_scanner_tencent.interfaces import (
     AccountStoreError,
     GameID,
@@ -30,10 +31,14 @@ from qr_live_scanner_tencent.interfaces import (
 )
 
 
-def _tencent_session(uid: str, token: str = "secret-token") -> TencentSession:
+def _tencent_session(
+    uid: str,
+    token: str = "secret-token",
+    provider: TencentLoginProvider = TencentLoginProvider.QQ,
+) -> TencentSession:
     return TencentSession(
         uid=uid,
-        provider=TencentLoginProvider.QQ,
+        provider=provider,
         credentials={"access_token": token},
     )
 
@@ -564,10 +569,112 @@ def test_main_window_refreshes_authorization_when_provider_changes(qtbot: QtBot)
         window.provider_combo.findData(TencentLoginProvider.WECHAT.value)
     )
 
-    status_item = window.account_table.item(0, 1)
-    assert status_item is not None
-    assert status_item.text() == "未保存"
-    assert window.authorization_state_label.text() == "账号授权：未授权 provider=wechat"
+    assert window.account_table.rowCount() == 0
+    assert window._selected_table_uid() == ""
+    assert window.auto_confirm_checkbox.isEnabled() is False
+
+
+def test_main_window_filters_account_rows_and_defaults_by_provider(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "gui-state.json"
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("qq-user", provider=TencentLoginProvider.QQ),
+        authorized=True,
+    )
+    store.save_tencent_session(
+        _tencent_session("wechat-user", provider=TencentLoginProvider.WECHAT),
+        authorized=True,
+    )
+    save_gui_state(
+        state_path,
+        GuiState(
+            provider=TencentLoginProvider.QQ,
+            default_uid="qq-user",
+            default_provider=TencentLoginProvider.QQ,
+            accounts=[
+                GuiAccountEntry(uid="qq-user", provider=TencentLoginProvider.QQ),
+                GuiAccountEntry(uid="wechat-user", provider=TencentLoginProvider.WECHAT),
+            ],
+        ),
+    )
+
+    window = MainWindow(account_store=store, state_path=state_path)
+    qtbot.addWidget(window)
+
+    assert window.account_table.rowCount() == 1
+    qq_uid_item = window.account_table.item(0, 0)
+    qq_default_item = window.account_table.item(0, 2)
+    assert qq_uid_item is not None
+    assert qq_default_item is not None
+    assert qq_uid_item.text() == "qq-user"
+    assert qq_default_item.text() != ""
+
+    window.provider_combo.setCurrentIndex(
+        window.provider_combo.findData(TencentLoginProvider.WECHAT.value)
+    )
+
+    assert window.account_table.rowCount() == 1
+    wechat_uid_item = window.account_table.item(0, 0)
+    wechat_default_item = window.account_table.item(0, 2)
+    assert wechat_uid_item is not None
+    assert wechat_default_item is not None
+    assert wechat_uid_item.text() == "wechat-user"
+    assert wechat_default_item.text() == ""
+    assert window.authorization_state_label.text().endswith("provider=wechat")
+
+
+def test_main_window_monitoring_uses_provider_scoped_default_account(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "gui-state.json"
+    controller = RecordingMonitorController()
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("qq-user", provider=TencentLoginProvider.QQ),
+        authorized=True,
+    )
+    store.save_tencent_session(
+        _tencent_session("wechat-user", provider=TencentLoginProvider.WECHAT),
+        authorized=True,
+    )
+    save_gui_state(
+        state_path,
+        GuiState(
+            provider=TencentLoginProvider.WECHAT,
+            default_uid="wechat-user",
+            default_provider=TencentLoginProvider.WECHAT,
+            accounts=[
+                GuiAccountEntry(uid="qq-user", provider=TencentLoginProvider.QQ),
+                GuiAccountEntry(uid="wechat-user", provider=TencentLoginProvider.WECHAT),
+            ],
+        ),
+    )
+    config = main_window_module._default_game_configs()[GameID.HONOR_OF_KINGS]
+    monkeypatch.setattr(
+        main_window_module,
+        "_default_game_configs",
+        lambda: {GameID.HONOR_OF_KINGS: replace(config, validated_protocol=True)},
+    )
+    window = MainWindow(
+        account_store=store,
+        monitor_controller=controller,
+        state_path=state_path,
+    )
+    qtbot.addWidget(window)
+    window.room_input.setText("5373751")
+    window.auto_confirm_checkbox.setChecked(True)
+
+    window.start_button.click()
+
+    assert controller.started_request is not None
+    assert controller.started_request.account_uid == "wechat-user"
+    assert controller.started_request.provider is TencentLoginProvider.WECHAT
+    assert controller.started_request.auto_confirm is True
 
 
 def test_main_window_can_set_default_account(qtbot: QtBot) -> None:

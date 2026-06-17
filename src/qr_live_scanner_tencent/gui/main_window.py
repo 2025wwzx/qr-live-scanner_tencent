@@ -217,6 +217,8 @@ class MainWindow(QMainWindow):
         self.state_path = Path(state_path) if state_path is not None else None
         self._state = load_gui_state(self.state_path) if self.state_path is not None else GuiState()
         self._default_uid = self._state.default_uid
+        self._default_provider = self._state.default_provider
+        self._account_entries: dict[tuple[TencentLoginProvider, str], GuiAccountEntry] = {}
         self.setWindowTitle("腾讯扫码器")
         self.setMinimumSize(560, 640)
         self.resize(560, 640)
@@ -510,8 +512,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("请先在账号列表中选中一个账号")
             return
 
+        provider = self._selected_provider()
         try:
-            self.account_store.delete_tencent_session(uid, self._selected_provider())
+            self.account_store.delete_tencent_session(uid, provider)
         except AccountStoreError:
             self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
             return
@@ -519,8 +522,10 @@ class MainWindow(QMainWindow):
         row = self._account_table_row(uid)
         if row >= 0:
             self.account_table.removeRow(row)
-        if self._default_uid == uid:
+        self._account_entries.pop((provider, uid), None)
+        if self._default_uid == uid and self._default_provider is provider:
             self._default_uid = ""
+            self._default_provider = TencentLoginProvider.QQ
         self._sync_auto_confirm_availability()
         self._sync_default_account_marks()
         self._sync_selected_account_label()
@@ -543,11 +548,13 @@ class MainWindow(QMainWindow):
         self._refresh_account_table_row(uid)
 
     def _refresh_account_table_row(self, uid: str) -> None:
+        provider = self._selected_provider()
         try:
-            authorized = self.account_store.is_tencent_authorized(uid, self._selected_provider())
+            authorized = self.account_store.is_tencent_authorized(uid, provider)
         except AccountStoreError:
             self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
             return
+        self._remember_account(uid, provider)
         if authorized:
             self._set_account_table_row(uid, "已保存")
             self.statusBar().showMessage("账号登录态已保存")
@@ -555,6 +562,40 @@ class MainWindow(QMainWindow):
             self._set_account_table_row(uid, "未保存")
             self.statusBar().showMessage("账号登录态未保存")
         self._save_state()
+
+    def _remember_account(
+        self,
+        uid: str,
+        provider: TencentLoginProvider | None = None,
+        display_name: str = "",
+    ) -> None:
+        uid = uid.strip()
+        if not uid:
+            return
+        provider = provider if provider is not None else self._selected_provider()
+        self._account_entries[(provider, uid)] = GuiAccountEntry(
+            uid=uid,
+            provider=provider,
+            display_name=display_name,
+        )
+
+    def _provider_default_uid(self) -> str:
+        if self._default_provider is not self._selected_provider():
+            return ""
+        return self._default_uid
+
+    def _reload_account_table_for_selected_provider(self) -> None:
+        selected_provider = self._selected_provider()
+        selected_uid = self._selected_table_uid()
+        self.account_table.setRowCount(0)
+        for account in self._account_entries.values():
+            if account.provider is selected_provider:
+                self._restore_account_row(account.uid)
+        target_uid = self._provider_default_uid() or selected_uid
+        if target_uid:
+            row = self._account_table_row(target_uid)
+            if row >= 0:
+                self.account_table.selectRow(row)
 
     def _refresh_account_authorization_rows(self) -> None:
         selected_uid = self._selected_table_uid()
@@ -574,7 +615,7 @@ class MainWindow(QMainWindow):
                 self.account_table.selectRow(row)
 
     def _handle_provider_changed(self) -> None:
-        self._refresh_account_authorization_rows()
+        self._reload_account_table_for_selected_provider()
         self._sync_selected_account_label()
         self._save_state()
 
@@ -592,7 +633,7 @@ class MainWindow(QMainWindow):
         if row < 0:
             row = self.account_table.rowCount()
             self.account_table.insertRow(row)
-        values = [uid, status, "是" if uid == self._default_uid else ""]
+        values = [uid, status, "是" if uid == self._provider_default_uid() else ""]
         for column, value in enumerate(values):
             self.account_table.setItem(row, column, QTableWidgetItem(value))
         self.account_table.selectRow(row)
@@ -621,6 +662,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("请先在账号列表中选中一个账号")
             return
         self._default_uid = uid
+        self._default_provider = self._selected_provider()
         self._sync_default_account_marks()
         self._sync_selected_account_label()
         self._save_state()
@@ -645,7 +687,7 @@ class MainWindow(QMainWindow):
             self.account_table.setItem(
                 row,
                 2,
-                QTableWidgetItem("是" if uid == self._default_uid else ""),
+                QTableWidgetItem("是" if uid == self._provider_default_uid() else ""),
             )
 
     def _sync_selected_account_label(self) -> None:
@@ -681,11 +723,14 @@ class MainWindow(QMainWindow):
         self.auto_exit_checkbox.setChecked(state.auto_exit)
         self.demo_mode_checkbox.setChecked(state.demo_mode)
         self._default_uid = state.default_uid
+        self._default_provider = state.default_provider
         for account in state.accounts:
-            self._restore_account_row(account.uid)
+            self._remember_account(account.uid, account.provider, account.display_name)
+        self._reload_account_table_for_selected_provider()
         self._sync_auto_confirm_availability()
-        if self._default_uid:
-            row = self._account_table_row(self._default_uid)
+        default_uid = self._provider_default_uid()
+        if default_uid:
+            row = self._account_table_row(default_uid)
             if row >= 0:
                 self.account_table.selectRow(row)
         self._sync_default_account_marks()
@@ -701,7 +746,9 @@ class MainWindow(QMainWindow):
     def _save_state(self) -> None:
         if self.state_path is None:
             return
-        accounts = [GuiAccountEntry(uid=uid) for uid in self._account_table_uids() if uid]
+        for uid in self._account_table_uids():
+            self._remember_account(uid)
+        accounts = list(self._account_entries.values())
         state = GuiState(
             platform=self._selected_platform(),
             game_id=self._selected_game_id(),
@@ -715,6 +762,7 @@ class MainWindow(QMainWindow):
             auto_exit=self.auto_exit_checkbox.isChecked(),
             demo_mode=self.demo_mode_checkbox.isChecked(),
             default_uid=self._default_uid,
+            default_provider=self._default_provider,
             accounts=accounts,
         )
         save_gui_state(self.state_path, state)

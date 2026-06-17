@@ -6,7 +6,7 @@ from qr_live_scanner_tencent.gui.state import (
     load_gui_state,
     save_gui_state,
 )
-from qr_live_scanner_tencent.interfaces import GameID, ROIConfig
+from qr_live_scanner_tencent.interfaces import GameID, ROIConfig, TencentLoginProvider
 
 
 def test_gui_state_round_trips_non_sensitive_monitor_and_account_index(tmp_path: Path) -> None:
@@ -38,6 +38,36 @@ def test_gui_state_round_trips_non_sensitive_monitor_and_account_index(tmp_path:
     assert "cookie" not in text.lower()
     assert "token" not in text.lower()
     assert "stoken" not in text.lower()
+
+
+def test_gui_state_round_trips_provider_scoped_account_index(tmp_path: Path) -> None:
+    path = tmp_path / "gui-state.json"
+    state = GuiState(
+        provider=TencentLoginProvider.WECHAT,
+        default_uid="same-uid",
+        default_provider=TencentLoginProvider.WECHAT,
+        accounts=[
+            GuiAccountEntry(uid="same-uid", provider=TencentLoginProvider.QQ),
+            GuiAccountEntry(
+                uid="same-uid",
+                provider=TencentLoginProvider.WECHAT,
+                display_name="wechat account",
+            ),
+        ],
+    )
+
+    save_gui_state(path, state)
+    loaded = load_gui_state(path)
+
+    assert loaded == state
+    assert loaded.accounts[0].provider is TencentLoginProvider.QQ
+    assert loaded.accounts[1].provider is TencentLoginProvider.WECHAT
+    assert loaded.default_provider is TencentLoginProvider.WECHAT
+    text = path.read_text(encoding="utf-8")
+    assert "provider" in text
+    assert "same-uid" in text
+    assert "cookie" not in text.lower()
+    assert "token" not in text.lower()
 
 
 def test_gui_state_loads_default_when_file_is_missing(tmp_path: Path) -> None:

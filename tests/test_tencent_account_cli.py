@@ -168,6 +168,67 @@ def test_tencent_login_cli_uses_local_protocol_config(
     assert "10001" not in output
 
 
+def test_tencent_login_cli_rejects_mismatched_provider_session(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    saved: list[TencentSession] = []
+
+    async def fake_capture(
+        service: object,
+        *,
+        qr_output_path: Path,
+        timeout_seconds: float,
+        poll_interval_seconds: float,
+    ) -> TencentSession:
+        assert service is not None
+        assert qr_output_path == tmp_path / "tencent-login.png"
+        assert timeout_seconds == 3
+        assert poll_interval_seconds == 0.01
+        return TencentSession(
+            uid="wechat-user",
+            provider=TencentLoginProvider.QQ,
+            credentials={"access_token": "SECRET_ACCESS_TOKEN", "openid": "SECRET_OPENID"},
+        )
+
+    class FakeStore:
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert authorized is True
+            assert isinstance(session, TencentSession)
+            saved.append(session)
+
+    monkeypatch.setattr(main_module, "_capture_tencent_session_from_qr", fake_capture)
+    monkeypatch.setattr(
+        main_module,
+        "_new_tencent_account_qr_login_service",
+        lambda _provider, **_kwargs: object(),
+    )
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(
+        [
+            "tencent-login",
+            "--provider",
+            "wechat",
+            "--qr-output",
+            str(tmp_path / "tencent-login.png"),
+            "--timeout-seconds",
+            "3",
+            "--poll-interval-seconds",
+            "0.01",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert saved == []
+    assert "provider mismatch" in output
+    assert "wechat-user" not in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "SECRET_OPENID" not in output
+
+
 def test_tencent_login_cli_scans_qr_and_saves_without_echoing_secrets(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
