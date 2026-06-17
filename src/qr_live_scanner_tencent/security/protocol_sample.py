@@ -13,6 +13,17 @@ from qr_live_scanner_tencent.security.har import (
 
 ALLOWED_TENCENT_PROTOCOL_SAMPLE_FLOWS = ("account-login", "game-scan-confirm")
 PROTOCOL_SAMPLE_REDACTION_ERROR = "protocol sample input must be redacted before import"
+PROTOCOL_SAMPLE_SCHEMA_ERROR = "protocol sample summary is invalid"
+PROTOCOL_NOTE_CHECKLIST_ITEMS = (
+    "QR payload shape and provider routing documented",
+    "Endpoint purpose mapped to fetch, query, scan, or confirm",
+    "Required request headers documented without values",
+    "Required request body fields documented without values",
+    "Response schema and success condition documented",
+    "Credential family and expiry behavior documented",
+    "Risk, captcha, device, signature, and app-version checks documented",
+    "Real HTTP remains gated until all fields are verified",
+)
 
 
 def build_tencent_protocol_sample_from_har(
@@ -49,6 +60,63 @@ def build_tencent_protocol_sample_from_har(
         "flow": normalized_flow,
         "entries": sample_entries,
     }
+
+
+def render_tencent_protocol_note(sample: dict[str, Any]) -> str:
+    """将非敏感协议形状摘要渲染为可填写的 Markdown 验证记录。
+
+    输入必须是 `build_tencent_protocol_sample_from_har` 生成的 summary 结构。
+    渲染结果只包含 provider、flow、endpoint 形状和固定 checklist，不包含 URL
+    参数值、header 值、正文文本、Cookie、token、ticket、UID 或 `[REDACTED]`。
+
+    Args:
+        sample: `tencent-protocol-sample` 生成的 JSON 对象。
+
+    Returns:
+        str: 可保存为 `.note.md` 的研究记录模板。
+    """
+
+    provider = _sample_text(sample, "provider")
+    flow = _validate_flow(_sample_text(sample, "flow"))
+    source = _sample_text(sample, "source")
+    if source != "redacted-har":
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+
+    entries = sample.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+
+    lines = [
+        "# Tencent Protocol Validation Note",
+        "",
+        f"- Provider: `{provider}`",
+        f"- Flow: `{flow}`",
+        f"- Source: `{source}`",
+        "- Real HTTP enabled: `false`",
+        "",
+        "## Endpoint Shapes",
+        "",
+        "| # | Method | Host | Path | Query Keys | Request Headers | Status |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for entry in entries:
+        lines.append(_endpoint_table_row(_sample_entry_from_summary(entry)))
+
+    lines.extend(
+        [
+            "",
+            "## Validation Checklist",
+            "",
+            *[f"- [ ] {item}" for item in PROTOCOL_NOTE_CHECKLIST_ITEMS],
+            "",
+            "## Notes",
+            "",
+            "- Keep raw HAR, Cookie, token, ticket, UID, QR payload, and signed URLs out of git.",
+            "- Fill endpoint purposes and success conditions only after local verification.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _validate_flow(flow: str) -> str:
@@ -118,6 +186,59 @@ def _sample_entry(index: int, entry: dict[str, Any]) -> dict[str, Any]:
         ),
         "response_body_mime_type": _mime_type(content),
     }
+
+
+def _sample_entry_from_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    required_fields = (
+        "index",
+        "method",
+        "host",
+        "path",
+        "query_keys",
+        "request_header_names",
+        "response_status",
+    )
+    if any(field not in value for field in required_fields):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    if not isinstance(value["query_keys"], list) or not isinstance(
+        value["request_header_names"], list
+    ):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    return value
+
+
+def _endpoint_table_row(entry: dict[str, Any]) -> str:
+    index = int(entry["index"])
+    method = _markdown_code(_summary_text(entry, "method"))
+    host = _markdown_code(_summary_text(entry, "host"))
+    path = _markdown_code(_summary_text(entry, "path"))
+    query_keys = _code_list(entry["query_keys"])
+    request_headers = _code_list(entry["request_header_names"])
+    status = _markdown_code(str(int(entry["response_status"])))
+    return f"| {index} | {method} | {host} | {path} | {query_keys} | {request_headers} | {status} |"
+
+
+def _sample_text(sample: dict[str, Any], field: str) -> str:
+    return _required_text(sample.get(field), f"protocol sample {field}")
+
+
+def _summary_text(entry: dict[str, Any], field: str) -> str:
+    return _required_text(entry.get(field), f"protocol sample entry {field}")
+
+
+def _code_list(values: Any) -> str:
+    if not isinstance(values, list):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    text_values = [str(value).strip() for value in values if str(value).strip()]
+    if not text_values:
+        return "-"
+    return ", ".join(_markdown_code(value) for value in text_values)
+
+
+def _markdown_code(value: str) -> str:
+    return f"`{value.replace('`', '')}`"
 
 
 def _assert_redacted_payload(value: Any) -> None:

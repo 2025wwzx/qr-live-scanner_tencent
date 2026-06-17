@@ -33,7 +33,11 @@ from qr_live_scanner_tencent.interfaces import (
     ROIConfig,
     TencentLoginProvider,
 )
-from qr_live_scanner_tencent.security import build_tencent_protocol_sample_from_har, redact_har
+from qr_live_scanner_tencent.security import (
+    build_tencent_protocol_sample_from_har,
+    redact_har,
+    render_tencent_protocol_note,
+)
 from qr_live_scanner_tencent.security.protocol_sample import ALLOWED_TENCENT_PROTOCOL_SAMPLE_FLOWS
 from qr_live_scanner_tencent.smoke import (
     DEFAULT_DECODE_SMOKE_MAX_WAIT_SECONDS,
@@ -75,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_redact_har(args)
     if args.command == "tencent-protocol-sample":
         return _run_tencent_protocol_sample(args)
+    if args.command == "tencent-protocol-note":
+        return _run_tencent_protocol_note(args)
     if args.command == "gui":
         return _run_gui(args)
     if args.command == "tencent-login":
@@ -187,6 +193,10 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=list(ALLOWED_TENCENT_PROTOCOL_SAMPLE_FLOWS),
         default="account-login",
     )
+
+    protocol_note_parser = subparsers.add_parser("tencent-protocol-note")
+    protocol_note_parser.add_argument("--input", required=True)
+    protocol_note_parser.add_argument("--output", required=True)
     return parser
 
 
@@ -474,6 +484,28 @@ def _run_tencent_protocol_sample(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent protocol sample import failed: {exc}")
         return 2
     print(f"Tencent protocol sample written: {output_path}")
+    return 0
+
+
+def _run_tencent_protocol_note(args: argparse.Namespace) -> int:
+    input_path = Path(str(args.input))
+    output_path = Path(str(args.output))
+    try:
+        if input_path.resolve() == output_path.resolve():
+            msg = "protocol note input and output paths must be different"
+            raise ValueError(msg)
+        with input_path.open("r", encoding="utf-8-sig") as file:
+            sample = json.load(file)
+        if not isinstance(sample, dict):
+            msg = "protocol sample root must be a JSON object"
+            raise ValueError(msg)
+        note = render_tencent_protocol_note(sample)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(note, encoding="utf-8")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"[WARN] Tencent protocol note rendering failed: {exc}")
+        return 2
+    print(f"Tencent protocol note written: {output_path}")
     return 0
 
 

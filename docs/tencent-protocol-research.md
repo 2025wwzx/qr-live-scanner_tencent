@@ -93,9 +93,20 @@ qr-live-scanner-tencent tencent-protocol-sample `
   --flow account-login
 ```
 
+Then render a Markdown validation note:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-note `
+  --input captures/tencent-login.sample.json `
+  --output captures/tencent-login.note.md
+```
+
 The sample file keeps only method, host, path, query/header names, status code,
 and MIME type. It rejects unredacted Cookie, token, ticket, account ID, UID,
 QR payload, request body text, and signed URL fragments before writing output.
+The note file is a checklist template for recording endpoint purpose, request
+body fields, response schema, success condition, credential family, and risk
+checks without copying raw values.
 
 Inspect only the redacted file. Raw HAR, Cookie, token, QR payload, account ID,
 and full query strings must stay local and must not be committed.
