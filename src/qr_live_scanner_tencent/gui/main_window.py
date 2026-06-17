@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
 
 import httpx
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QCloseEvent, QPixmap
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -105,6 +105,90 @@ class TencentAccountQRLoginServiceProtocol(Protocol):
 class TencentAccountQRLoginServiceFactory(Protocol):
     def __call__(self, provider: TencentLoginProvider) -> TencentAccountQRLoginServiceProtocol:
         """Return a Tencent account QR login service for the selected provider."""
+
+
+class TencentAccountQRLoginWorker(QThread):
+    qr_ready = Signal(str)
+    status_changed = Signal(str)
+    session_ready = Signal(object)
+    failed = Signal()
+    canceled = Signal()
+
+    def __init__(
+        self,
+        *,
+        provider: TencentLoginProvider,
+        service_factory: TencentAccountQRLoginServiceFactory,
+        qr_output_path: Path,
+        timeout_seconds: float,
+        poll_interval_seconds: float,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._provider = provider
+        self._service_factory = service_factory
+        self._qr_output_path = qr_output_path
+        self._timeout_seconds = timeout_seconds
+        self._poll_interval_seconds = poll_interval_seconds
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def run(self) -> None:
+        try:
+            asyncio.run(self._run_login())
+        except TencentAccountQRLoginError:
+            self.failed.emit()
+        except Exception:
+            self.failed.emit()
+
+    async def _run_login(self) -> None:
+        service = self._service_factory(self._provider)
+        try:
+            ticket = await service.fetch_qr()
+            if self._cancel_requested:
+                self.canceled.emit()
+                return
+            service.write_qr_png(ticket, self._qr_output_path)
+            self.qr_ready.emit(str(self._qr_output_path))
+            self.status_changed.emit("QR generated; waiting for scan")
+            deadline = time.monotonic() + self._timeout_seconds
+            scanned_reported = False
+            while time.monotonic() < deadline:
+                if self._cancel_requested:
+                    self.canceled.emit()
+                    return
+                status = await service.query_qr(ticket)
+                if self._cancel_requested:
+                    self.canceled.emit()
+                    return
+                if status.state is TencentAccountQRLoginState.SCANNED and not scanned_reported:
+                    scanned_reported = True
+                    self.status_changed.emit("QR scanned; waiting for confirmation")
+                elif status.state is TencentAccountQRLoginState.CONFIRMED:
+                    if status.session is None:
+                        msg = "confirmed Tencent account session is missing"
+                        raise TencentAccountQRLoginError(msg)
+                    self.session_ready.emit(status.session)
+                    return
+                elif status.state is TencentAccountQRLoginState.EXPIRED:
+                    msg = "Tencent account QR login expired"
+                    raise TencentAccountQRLoginError(msg)
+                elif status.state is TencentAccountQRLoginState.FAILED:
+                    msg = "Tencent account QR login failed"
+                    raise TencentAccountQRLoginError(msg)
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(self._poll_interval_seconds, remaining))
+
+            msg = "Tencent account QR login timed out"
+            raise TencentAccountQRLoginError(msg)
+        finally:
+            with suppress(Exception):
+                await service.aclose()
 
 
 class MainWindow(QMainWindow):
@@ -808,6 +892,7 @@ class TencentAccountDialog(QDialog):
         self._timeout_seconds = timeout_seconds
         self._poll_interval_seconds = poll_interval_seconds
         self._uid = ""
+        self._login_worker: TencentAccountQRLoginWorker | None = None
 
         self.setWindowTitle("Tencent account QR login")
         self.provider_label = QLabel(f"Provider: {self._provider.value}")
@@ -815,8 +900,16 @@ class TencentAccountDialog(QDialog):
         self.status_label.setWordWrap(True)
         self.qr_path_label = QLabel("QR image: -")
         self.qr_path_label.setWordWrap(True)
+        self.qr_preview_label = QLabel()
+        self.qr_preview_label.setObjectName("qr_preview_label")
+        self.qr_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_preview_label.setFixedSize(240, 240)
+        self.qr_preview_label.setText("QR")
         self.start_login_button = QPushButton("Generate QR")
         self.start_login_button.clicked.connect(self._run_qr_login)
+        self.cancel_login_button = QPushButton("Cancel")
+        self.cancel_login_button.setEnabled(False)
+        self.cancel_login_button.clicked.connect(self._cancel_qr_login)
 
         self.demo_qr_button = QPushButton("Generate dry-run QR")
         self.demo_qr_button.clicked.connect(self._write_dry_run_qr)
@@ -828,8 +921,12 @@ class TencentAccountDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.provider_label)
-        layout.addWidget(self.start_login_button)
-        layout.addWidget(self.demo_qr_button)
+        login_buttons = QHBoxLayout()
+        login_buttons.addWidget(self.start_login_button)
+        login_buttons.addWidget(self.cancel_login_button)
+        login_buttons.addWidget(self.demo_qr_button)
+        layout.addLayout(login_buttons)
+        layout.addWidget(self.qr_preview_label)
         layout.addWidget(self.qr_path_label)
         layout.addWidget(self.status_label)
         layout.addWidget(self.buttons)
@@ -838,30 +935,35 @@ class TencentAccountDialog(QDialog):
         return self._uid
 
     def _run_qr_login(self) -> None:
-        self.start_login_button.setEnabled(False)
-        service = self._service_factory(self._provider)
-        try:
-            session = asyncio.run(
-                self._capture_session(
-                    service,
-                    qr_output_path=self._qr_output_path,
-                    timeout_seconds=self._timeout_seconds,
-                    poll_interval_seconds=self._poll_interval_seconds,
-                )
-            )
-            self._account_store.save_tencent_session(session, authorized=True)
-        except AccountStoreError:
-            self.status_label.setText(ACCOUNT_STORE_ERROR_HINT)
+        if self._login_worker is not None and self._login_worker.isRunning():
             return
-        except (TencentAccountQRLoginError, ValueError):
-            self.status_label.setText(ACCOUNT_QR_LOGIN_ERROR_HINT)
+        self._uid = ""
+        self.ok_button.setEnabled(False)
+        self._set_login_running(True)
+        self.status_label.setText("Generating QR")
+        worker = TencentAccountQRLoginWorker(
+            provider=self._provider,
+            service_factory=self._service_factory,
+            qr_output_path=self._qr_output_path,
+            timeout_seconds=self._timeout_seconds,
+            poll_interval_seconds=self._poll_interval_seconds,
+            parent=self,
+        )
+        worker.qr_ready.connect(self._handle_qr_ready)
+        worker.status_changed.connect(self.status_label.setText)
+        worker.session_ready.connect(self._handle_login_session)
+        worker.failed.connect(self._handle_login_failed)
+        worker.canceled.connect(self._handle_login_canceled)
+        worker.finished.connect(self._handle_login_worker_finished)
+        self._login_worker = worker
+        worker.start()
+
+    def _cancel_qr_login(self) -> None:
+        if self._login_worker is None or not self._login_worker.isRunning():
             return
-        finally:
-            self.start_login_button.setEnabled(True)
-        self._uid = session.uid
-        self.ok_button.setEnabled(True)
-        self.status_label.setText("Tencent account session saved")
-        self.accept()
+        self.cancel_login_button.setEnabled(False)
+        self.status_label.setText("Canceling Tencent account QR login")
+        self._login_worker.cancel()
 
     def _write_dry_run_qr(self) -> None:
         service = TencentAccountQRLoginService.dry_run(
@@ -871,57 +973,58 @@ class TencentAccountDialog(QDialog):
         try:
             ticket = service.dry_run_ticket()
             service.write_qr_png(ticket, self._qr_output_path)
-            self.qr_path_label.setText(f"QR image: {self._qr_output_path}")
+            self._handle_qr_ready(str(self._qr_output_path))
             self.status_label.setText("Dry-run QR image generated")
         finally:
             asyncio.run(service.aclose())
 
-    async def _capture_session(
-        self,
-        service: TencentAccountQRLoginServiceProtocol,
-        *,
-        qr_output_path: Path,
-        timeout_seconds: float,
-        poll_interval_seconds: float,
-    ) -> TencentSession:
+    def _handle_qr_ready(self, path_text: str) -> None:
+        self.qr_path_label.setText(f"QR image: {path_text}")
+        pixmap = QPixmap(path_text)
+        if pixmap.isNull():
+            self.qr_preview_label.setText("QR image generated")
+            return
+        self.qr_preview_label.setPixmap(
+            pixmap.scaled(
+                self.qr_preview_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def _handle_login_session(self, session: object) -> None:
+        if not isinstance(session, TencentSession):
+            self._handle_login_failed()
+            return
         try:
-            ticket = await service.fetch_qr()
-            service.write_qr_png(ticket, qr_output_path)
-            self.qr_path_label.setText(f"QR image: {qr_output_path}")
-            self.status_label.setText("QR generated; waiting for scan")
-            QApplication.processEvents()
-            deadline = time.monotonic() + timeout_seconds
-            scanned_reported = False
-            while time.monotonic() < deadline:
-                status = await service.query_qr(ticket)
-                if status.state is TencentAccountQRLoginState.SCANNED and not scanned_reported:
-                    scanned_reported = True
-                    self.status_label.setText("QR scanned; waiting for confirmation")
-                    QApplication.processEvents()
-                elif status.state is TencentAccountQRLoginState.CONFIRMED:
-                    if status.session is None:
-                        msg = "confirmed Tencent account session is missing"
-                        raise TencentAccountQRLoginError(msg)
-                    return status.session
-                elif status.state is TencentAccountQRLoginState.EXPIRED:
-                    msg = "Tencent account QR login expired"
-                    raise TencentAccountQRLoginError(msg)
-                elif status.state is TencentAccountQRLoginState.FAILED:
-                    msg = "Tencent account QR login failed"
-                    raise TencentAccountQRLoginError(msg)
+            self._account_store.save_tencent_session(session, authorized=True)
+        except AccountStoreError:
+            self.status_label.setText(ACCOUNT_STORE_ERROR_HINT)
+            self._set_login_running(False)
+            return
+        self._uid = session.uid
+        self.ok_button.setEnabled(True)
+        self.status_label.setText("Tencent account session saved")
+        self._set_login_running(False)
+        self.accept()
 
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                await asyncio.sleep(min(poll_interval_seconds, remaining))
+    def _handle_login_failed(self) -> None:
+        self.status_label.setText(ACCOUNT_QR_LOGIN_ERROR_HINT)
+        self._set_login_running(False)
 
-            msg = "Tencent account QR login timed out"
-            raise TencentAccountQRLoginError(msg)
-        finally:
-            try:
-                await service.aclose()
-            except Exception:
-                self.status_label.setText("Tencent account QR service close failed")
+    def _handle_login_canceled(self) -> None:
+        self.status_label.setText("Tencent account QR login canceled")
+        self._set_login_running(False)
+
+    def _handle_login_worker_finished(self) -> None:
+        if not self._uid:
+            self._set_login_running(False)
+        self._login_worker = None
+
+    def _set_login_running(self, running: bool) -> None:
+        self.start_login_button.setEnabled(not running)
+        self.demo_qr_button.setEnabled(not running)
+        self.cancel_login_button.setEnabled(running)
 
 
 CLIENT_STYLE_SHEET = """
