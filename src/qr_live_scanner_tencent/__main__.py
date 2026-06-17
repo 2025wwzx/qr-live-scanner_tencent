@@ -671,6 +671,9 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
             msg = "Tencent account provider mismatch"
             raise TencentAccountQRLoginError(msg)
         KeyringAccountStore().save_tencent_session(session, authorized=True)
+    except AccountStoreError:
+        print("[WARN] Tencent account QR login failed: credential storage unavailable")
+        return 2
     except (ValueError, QRLiveScannerError, TencentAccountQRLoginError) as exc:
         print(f"[WARN] Tencent account QR login failed: {exc}")
         return 2
