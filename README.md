@@ -39,6 +39,14 @@ python -m mypy
 
 ## Tencent Account QR Login
 
+After `redact-har`, protocol research can extract a non-sensitive endpoint shape
+summary without query values, header values, body text, Cookie, token, ticket, UID,
+or QR payload:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-sample --input captures/tencent-login.redacted.har --output captures/tencent-login.sample.json --provider qq --flow account-login
+```
+
 已新增独立账号登录链路：`tencent-login` 会由本项目生成 QQ/微信账号登录二维码，
 确认成功后将 `TencentSession` 保存到本地 keyring 的 `qr-live-scanner-tencent`
 namespace。当前真实 QQ/微信协议参数仍未验证，默认只允许 `--dry-run` 或测试 mock；

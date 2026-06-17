@@ -33,7 +33,8 @@ from qr_live_scanner_tencent.interfaces import (
     ROIConfig,
     TencentLoginProvider,
 )
-from qr_live_scanner_tencent.security import redact_har
+from qr_live_scanner_tencent.security import build_tencent_protocol_sample_from_har, redact_har
+from qr_live_scanner_tencent.security.protocol_sample import ALLOWED_TENCENT_PROTOCOL_SAMPLE_FLOWS
 from qr_live_scanner_tencent.smoke import (
     DEFAULT_DECODE_SMOKE_MAX_WAIT_SECONDS,
     DEFAULT_TARGET_P95_MS,
@@ -72,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_decode_probe(args)
     if args.command == "redact-har":
         return _run_redact_har(args)
+    if args.command == "tencent-protocol-sample":
+        return _run_tencent_protocol_sample(args)
     if args.command == "gui":
         return _run_gui(args)
     if args.command == "tencent-login":
@@ -170,6 +173,20 @@ def _build_parser() -> argparse.ArgumentParser:
     redact_parser = subparsers.add_parser("redact-har")
     redact_parser.add_argument("--input", required=True)
     redact_parser.add_argument("--output", required=True)
+
+    protocol_sample_parser = subparsers.add_parser("tencent-protocol-sample")
+    protocol_sample_parser.add_argument("--input", required=True)
+    protocol_sample_parser.add_argument("--output", required=True)
+    protocol_sample_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+    protocol_sample_parser.add_argument(
+        "--flow",
+        choices=list(ALLOWED_TENCENT_PROTOCOL_SAMPLE_FLOWS),
+        default="account-login",
+    )
     return parser
 
 
@@ -428,6 +445,35 @@ def _run_redact_har(args: argparse.Namespace) -> int:
         print(f"[WARN] HAR redaction failed: {exc}")
         return 2
     print(f"HAR redacted: {output_path}")
+    return 0
+
+
+def _run_tencent_protocol_sample(args: argparse.Namespace) -> int:
+    input_path = Path(str(args.input))
+    output_path = Path(str(args.output))
+    try:
+        if input_path.resolve() == output_path.resolve():
+            msg = "protocol sample input and output paths must be different"
+            raise ValueError(msg)
+        with input_path.open("r", encoding="utf-8-sig") as file:
+            har = json.load(file)
+        if not isinstance(har, dict):
+            msg = "HAR root must be a JSON object"
+            raise ValueError(msg)
+        _validate_har_shape(har)
+        sample = build_tencent_protocol_sample_from_har(
+            har,
+            provider=TencentLoginProvider(str(args.provider)),
+            flow=str(args.flow),
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as file:
+            json.dump(sample, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"[WARN] Tencent protocol sample import failed: {exc}")
+        return 2
+    print(f"Tencent protocol sample written: {output_path}")
     return 0
 
 

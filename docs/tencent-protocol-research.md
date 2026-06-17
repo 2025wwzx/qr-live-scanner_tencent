@@ -83,6 +83,20 @@ qr-live-scanner-tencent redact-har `
   --output captures/tencent-login.redacted.har
 ```
 
+Then extract a non-sensitive shape summary for local protocol notes:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-sample `
+  --input captures/tencent-login.redacted.har `
+  --output captures/tencent-login.sample.json `
+  --provider qq `
+  --flow account-login
+```
+
+The sample file keeps only method, host, path, query/header names, status code,
+and MIME type. It rejects unredacted Cookie, token, ticket, account ID, UID,
+QR payload, request body text, and signed URL fragments before writing output.
+
 Inspect only the redacted file. Raw HAR, Cookie, token, QR payload, account ID,
 and full query strings must stay local and must not be committed.
 
