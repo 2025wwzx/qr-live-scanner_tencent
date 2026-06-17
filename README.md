@@ -78,7 +78,7 @@ provider/UID 的 TencentSession；如果要复用测试 UID，请先运行 `tenc
 如果索引内容损坏，后续列表、保存或删除会安全重建该 provider 的索引。
 `tencent-delete` 只清除本地保存的 TencentSession 和授权标记，不连接腾讯服务，
 也不会输出账号 ID、Cookie、token、ticket 或二维码 payload。
-`tencent-account-smoke` 只做本地保存、查询和可选清理，不创建真实 QR 登录服务，
+`tencent-account-smoke` 只做本地保存、查询、账号索引验证和可选清理，不创建真实 QR 登录服务，
 适合快速确认 QQ/微信账号信息保留链路。它默认不会覆盖已有同 provider/UID 的
 TencentSession；如果要复用测试 UID，请先运行 `tencent-delete` 清理。
 

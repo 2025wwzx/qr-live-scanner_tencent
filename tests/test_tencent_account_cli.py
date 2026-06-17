@@ -854,6 +854,22 @@ def test_tencent_account_smoke_cli_saves_verifies_and_cleans_up_without_http(
             operations.append("authorized")
             return (provider, uid) in self.authorized
 
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.WECHAT
+            operations.append("list")
+            return [
+                TencentAccountIndexEntry(
+                    uid=uid,
+                    provider=provider,
+                    authorized=(provider, uid) in self.authorized,
+                )
+                for session_provider, uid in self.sessions
+                if session_provider is provider
+            ]
+
         def delete_tencent_session(
             self,
             uid: str,
@@ -890,12 +906,71 @@ def test_tencent_account_smoke_cli_saves_verifies_and_cleans_up_without_http(
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert operations == ["get", "save", "get", "authorized", "delete"]
+    assert operations == ["get", "save", "get", "authorized", "list", "delete", "list"]
     assert fake_store.sessions == {}
     assert fake_store.authorized == set()
     assert "Tencent account local smoke passed" in output
+    assert "Tencent account local index verified" in output
     assert "Tencent account local smoke cleaned up" in output
+    assert "Tencent account local index cleaned up" in output
     assert "local-wechat-user" not in output
+    assert "local-smoke-only" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_account_smoke_cli_fails_when_index_missing_after_save(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def __init__(self) -> None:
+            self.session = TencentSession(
+                uid="10001",
+                provider=TencentLoginProvider.QQ,
+                credentials={"mock_session": "local-smoke-only"},
+            )
+
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "10001"
+            assert provider is TencentLoginProvider.QQ
+            return None if not hasattr(self, "saved") else self.session
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            assert authorized is True
+            self.saved = True
+
+        def is_tencent_authorized(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> bool:
+            assert uid == "10001"
+            assert provider is TencentLoginProvider.QQ
+            return True
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return []
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-account-smoke", "--provider", "qq", "--uid", "10001"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "local smoke failed: index missing" in output
+    assert "10001" not in output
     assert "local-smoke-only" not in output
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()

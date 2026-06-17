@@ -27,6 +27,7 @@ from qr_live_scanner_tencent.accounts import (
 )
 from qr_live_scanner_tencent.interfaces import (
     DEFAULT_AGGRESSIVE_ROI,
+    AccountStore,
     AccountStoreError,
     AuthMode,
     GameID,
@@ -815,10 +816,18 @@ def _run_tencent_account_smoke(args: argparse.Namespace) -> int:
         if not store.is_tencent_authorized(uid, provider):
             print("[WARN] Tencent account local smoke failed: authorization missing")
             return 1
+        if not _tencent_account_index_contains(store, uid, provider, authorized=True):
+            print("[WARN] Tencent account local smoke failed: index missing")
+            return 1
         print("Tencent account local smoke passed")
+        print("Tencent account local index verified")
         if bool(args.cleanup):
             store.delete_tencent_session(uid, provider)
             print("Tencent account local smoke cleaned up")
+            if _tencent_account_index_contains(store, uid, provider, authorized=None):
+                print("[WARN] Tencent account local smoke failed: index cleanup missing")
+                return 1
+            print("Tencent account local index cleaned up")
     except AccountStoreError:
         print("[WARN] Tencent account local smoke failed: credential storage unavailable")
         return 2
@@ -826,6 +835,20 @@ def _run_tencent_account_smoke(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent account local smoke failed: {exc}")
         return 2
     return 0
+
+
+def _tencent_account_index_contains(
+    store: AccountStore,
+    uid: str,
+    provider: TencentLoginProvider,
+    *,
+    authorized: bool | None,
+) -> bool:
+    entries = store.list_tencent_sessions(provider)
+    for entry in entries:
+        if entry.provider is provider and entry.uid == uid:
+            return authorized is None or entry.authorized is authorized
+    return False
 
 
 def _new_tencent_account_qr_login_service(

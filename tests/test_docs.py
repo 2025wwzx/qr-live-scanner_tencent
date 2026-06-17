@@ -15,6 +15,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "只会清理本地自检生成的" in readme
     assert "mock TencentSession" in readme
     assert "tencent-account-smoke" in readme
+    assert "账号索引验证" in readme
     assert "tencent-list --provider wechat" in readme
     assert "清理陈旧索引" in readme
     assert "安全重建该 provider 的索引" in readme
