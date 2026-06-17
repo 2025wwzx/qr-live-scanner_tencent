@@ -70,7 +70,7 @@ class TencentGameAuthAdapter:
     account_store: AccountStore | None = None
 
     async def scan(self, candidate: QRCandidate, account: AccountRef) -> ScanResult:
-        self._ensure_account_game(account)
+        self._ensure_account_matches_config(account)
         self._ensure_protocol_validated()
         qr_payload = _require_qr_payload(candidate.payload)
         parsed_payload = parse_tencent_game_qr_payload(qr_payload)
@@ -98,7 +98,7 @@ class TencentGameAuthAdapter:
         return ScanResult(candidate=candidate, account=account, scan_token=token)
 
     async def confirm(self, scan_result: ScanResult) -> ConfirmResult:
-        self._ensure_account_game(scan_result.account)
+        self._ensure_account_matches_config(scan_result.account)
         self._ensure_protocol_validated()
         scan_token = str(scan_result.scan_token).strip()
         if not scan_token:
@@ -129,12 +129,15 @@ class TencentGameAuthAdapter:
             message="confirmed" if success else "not confirmed",
         )
 
-    def _ensure_account_game(self, account: AccountRef) -> None:
+    def _ensure_account_matches_config(self, account: AccountRef) -> None:
         if account.game_id is not self.config.game_id:
             msg = (
                 f"account game {account.game_id} does not match adapter game {self.config.game_id}"
             )
             raise ValueError(msg)
+        if account.provider is not self.config.provider:
+            msg = "Tencent account provider does not match adapter provider"
+            raise AuthorizationError(msg)
 
     def _ensure_protocol_validated(self) -> None:
         if not self.config.validated_protocol:
@@ -215,10 +218,11 @@ def _provider_from_payload(
     query: dict[str, list[str]],
 ) -> TencentLoginProvider | None:
     raw_provider = (_first_query_value(query, ("provider", "login_type", "channel")) or "").lower()
-    if raw_provider in {"qq", "ptlogin"} or "qq.com" in host.lower():
-        return TencentLoginProvider.QQ
-    if raw_provider in {"wechat", "weixin", "wx"} or "weixin.qq.com" in host.lower():
+    lowered_host = host.lower()
+    if raw_provider in {"wechat", "weixin", "wx"} or "weixin.qq.com" in lowered_host:
         return TencentLoginProvider.WECHAT
+    if raw_provider in {"qq", "ptlogin"} or "qq.com" in lowered_host:
+        return TencentLoginProvider.QQ
     return None
 
 

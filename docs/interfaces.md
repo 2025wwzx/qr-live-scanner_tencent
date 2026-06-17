@@ -19,6 +19,8 @@
 - `TencentLoginProvider` supports `qq` and `wechat`; GUI defaults to `qq`.
 - `GameAuthAdapter.scan(candidate: QRCandidate, account: AccountRef) -> ScanResult`
 - `GameAuthAdapter.confirm(scan_result: ScanResult) -> ConfirmResult`
+- `AccountRef.provider` must match the adapter config provider before scan or
+  confirm can run.
 - `AccountStore` owns storage only:
   `get_tencent_session`, `save_tencent_session`, `delete_tencent_session`, and
   `is_tencent_authorized`.

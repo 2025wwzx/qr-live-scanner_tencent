@@ -74,6 +74,16 @@ def test_parse_tencent_game_qr_payload_extracts_safe_fields() -> None:
     assert "SECRET_TICKET" not in parsed.safe_description()
 
 
+def test_parse_tencent_game_qr_payload_detects_wechat_before_shared_qq_domain() -> None:
+    parsed = parse_tencent_game_qr_payload(
+        "https://weixin.qq.com/game/login?ticket=SECRET_TICKET"
+    )
+
+    assert parsed.provider is TencentLoginProvider.WECHAT
+    assert parsed.ticket == "SECRET_TICKET"
+    assert "SECRET_TICKET" not in parsed.safe_description()
+
+
 def test_parse_tencent_game_qr_payload_rejects_missing_ticket_without_echo() -> None:
     payload = "https://ssl.ptlogin2.qq.com/ptqrlogin?appid=hok"
 
@@ -156,4 +166,36 @@ async def test_tencent_adapter_requires_session_before_validated_http() -> None:
             account,
         )
 
+    assert "SECRET_TICKET" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_tencent_adapter_rejects_account_provider_mismatch_before_http() -> None:
+    called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"scan_token": "SECRET_SCAN_TOKEN"})
+
+    account = AccountRef(
+        uid="wechat-user",
+        game_id=GameID.HONOR_OF_KINGS,
+        provider=TencentLoginProvider.WECHAT,
+    )
+    adapter = TencentGameAuthAdapter(
+        config=_config(),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        account_store=_store(account),
+    )
+
+    with pytest.raises(AuthorizationError, match="provider") as exc_info:
+        await adapter.scan(
+            _candidate(
+                "https://login.example.test/game/login?provider=wechat&ticket=SECRET_TICKET"
+            ),
+            account,
+        )
+
+    assert called is False
     assert "SECRET_TICKET" not in str(exc_info.value)
