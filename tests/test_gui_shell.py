@@ -845,9 +845,55 @@ def test_main_window_local_account_smoke_saves_mock_session_without_http(
     assert uid_item.text() == "gui-wechat-smoke"
     assert status_item.text() == "已保存"
     assert "本地账号自检通过" in window.statusBar().currentMessage()
+    assert "账号索引验证通过" in window.statusBar().currentMessage()
     assert "local-smoke-only" not in window.statusBar().currentMessage()
     assert "token" not in window.statusBar().currentMessage().lower()
     assert "cookie" not in window.statusBar().currentMessage().lower()
+
+
+def test_main_window_local_account_smoke_fails_when_index_missing_after_save(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    class MissingIndexStore(FakeAccountStore):
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.WECHAT
+            return []
+
+    class FakeTencentAccountSmokeDialog:
+        def __init__(self, **kwargs: object) -> None:
+            assert kwargs["provider"] is TencentLoginProvider.WECHAT
+            self._uid = "gui-wechat-smoke"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "TencentAccountSmokeDialog",
+        FakeTencentAccountSmokeDialog,
+    )
+    window = MainWindow(account_store=MissingIndexStore())
+    qtbot.addWidget(window)
+    window.provider_combo.setCurrentIndex(
+        window.provider_combo.findData(TencentLoginProvider.WECHAT.value)
+    )
+
+    window._run_tencent_account_smoke_dialog()
+
+    assert window.account_table.rowCount() == 0
+    message = window.statusBar().currentMessage()
+    assert "本地账号自检失败：索引验证失败" in message
+    assert "gui-wechat-smoke" not in message
+    assert "local-smoke-only" not in message
+    assert "token" not in message.lower()
+    assert "cookie" not in message.lower()
 
 
 def test_main_window_local_account_smoke_does_not_overwrite_existing_session(

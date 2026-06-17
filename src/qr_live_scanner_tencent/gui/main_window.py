@@ -630,20 +630,23 @@ class MainWindow(QMainWindow):
             if self.account_store.get_tencent_session(uid, provider) is not None:
                 self.statusBar().showMessage("本地账号自检失败：已存在同 provider/UID")
                 return
-            self.account_store.save_tencent_session(
+            _save_tencent_session_with_index_verification(
+                self.account_store,
                 TencentSession(
                     uid=uid,
                     provider=provider,
                     credentials={"mock_session": "local-smoke-only"},
                 ),
-                authorized=True,
             )
         except AccountStoreError:
             self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
             return
+        except TencentAccountQRLoginError:
+            self.statusBar().showMessage("本地账号自检失败：索引验证失败")
+            return
         self._refresh_account_table_row(uid)
         if self._account_table_row(uid) >= 0:
-            self.statusBar().showMessage("本地账号自检通过")
+            self.statusBar().showMessage("本地账号自检通过；账号索引验证通过")
 
     def _clear_tencent_account_smoke_dialog(self) -> None:
         provider = self._selected_provider()
