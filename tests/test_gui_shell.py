@@ -27,6 +27,7 @@ from qr_live_scanner_tencent.interfaces import (
     AccountStoreError,
     GameID,
     ROIConfig,
+    TencentAccountIndexEntry,
     TencentLoginProvider,
 )
 
@@ -78,6 +79,12 @@ class FailingAccountStore:
         uid: str,
         provider: TencentLoginProvider = TencentLoginProvider.QQ,
     ) -> bool:
+        raise AccountStoreError("SECRET_TOKEN_VALUE should not be visible")
+
+    def list_tencent_sessions(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> list[TencentAccountIndexEntry]:
         raise AccountStoreError("SECRET_TOKEN_VALUE should not be visible")
 
 
@@ -234,12 +241,15 @@ def test_main_window_contains_core_controls(qtbot: QtBot) -> None:
     account_menu = window.menuBar().actions()[0].menu()
     assert account_menu is not None
     assert isinstance(account_menu, QMenu)
-    assert account_menu.actions()[0].text() == "新增账号"
-    assert account_menu.actions()[1].text() == "导入已保存账号"
-    assert account_menu.actions()[2].text() == "设为默认账号"
-    assert account_menu.actions()[3].text() == "删除账号"
-    assert account_menu.actions()[4].text() == "本地账号自检"
-    assert account_menu.actions()[5].text() == "清理本地自检"
+    assert [action.text() for action in account_menu.actions()[:7]] == [
+        "新增账号",
+        "导入已保存账号",
+        "导入全部已保存账号",
+        "设为默认账号",
+        "删除账号",
+        "本地账号自检",
+        "清理本地自检",
+    ]
     roi_menu = window.menuBar().actions()[1].menu()
     assert roi_menu is not None
     assert isinstance(roi_menu, QMenu)
@@ -608,6 +618,53 @@ def test_main_window_import_account_redacts_storage_errors(
     assert window.statusBar().currentMessage() == "账号管理：请检查本机凭证存储配置"
     assert "SECRET_TOKEN_VALUE" not in window.statusBar().currentMessage()
     assert "10001" not in window.statusBar().currentMessage()
+
+
+def test_main_window_imports_all_saved_tencent_accounts_for_selected_provider(
+    qtbot: QtBot,
+) -> None:
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("qq-user", "SECRET_QQ_TOKEN", TencentLoginProvider.QQ),
+        authorized=True,
+    )
+    store.save_tencent_session(
+        _tencent_session("wechat-user", "SECRET_WECHAT_TOKEN", TencentLoginProvider.WECHAT),
+        authorized=True,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window.provider_combo.setCurrentText(TencentLoginProvider.QQ.value)
+
+    window._import_saved_tencent_accounts()
+
+    assert window.account_table.rowCount() == 1
+    uid_item = window.account_table.item(0, 0)
+    status_item = window.account_table.item(0, 1)
+    assert uid_item is not None
+    assert status_item is not None
+    assert uid_item.text() == "qq-user"
+    assert status_item.text() == "已保存"
+    assert "已导入本地已保存账号" in window.statusBar().currentMessage()
+    assert "SECRET_QQ_TOKEN" not in window.statusBar().currentMessage()
+    assert "SECRET_WECHAT_TOKEN" not in window.statusBar().currentMessage()
+    assert "token" not in window.statusBar().currentMessage().lower()
+    assert "cookie" not in window.statusBar().currentMessage().lower()
+
+
+def test_main_window_import_all_saved_tencent_accounts_redacts_storage_errors(
+    qtbot: QtBot,
+) -> None:
+    window = MainWindow(account_store=FailingAccountStore())
+    qtbot.addWidget(window)
+
+    window._import_saved_tencent_accounts()
+
+    assert window.account_table.rowCount() == 0
+    assert window.statusBar().currentMessage() == "账号管理：请检查本机凭证存储配置"
+    assert "SECRET_TOKEN_VALUE" not in window.statusBar().currentMessage()
+    assert "token" not in window.statusBar().currentMessage().lower()
+    assert "cookie" not in window.statusBar().currentMessage().lower()
 
 
 def test_import_tencent_account_dialog_redacts_sensitive_hint_text(qtbot: QtBot) -> None:

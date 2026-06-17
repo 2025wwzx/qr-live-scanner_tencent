@@ -24,6 +24,8 @@
 - `AccountStore` owns storage only:
   `get_tencent_session`, `save_tencent_session`, `delete_tencent_session`, and
   `is_tencent_authorized`.
+- `AccountStore.list_tencent_sessions(provider)` returns local provider/UID
+  index entries and must not include credential values.
 - `LoginOrchestrator` is the only policy enforcer before scan/confirm.
 
 ## Security
@@ -31,5 +33,6 @@
 - Keyring namespace is `service="qr-live-scanner-tencent"`.
 - Tencent sessions use `username="tencent:{provider}:{uid}"`.
 - Authorization flags use `username="authorized:tencent:{provider}:{uid}"`.
+- Tencent local account indexes use `username="tencent:index:{provider}"`.
 - Logs must not include Cookie, token, account ID, QR payload, scan token, or
   full signed URLs.

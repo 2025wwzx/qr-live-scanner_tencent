@@ -45,6 +45,12 @@ class AccountConfig(BaseModel):
     ) -> str:
         return f"tencent:{provider.value}:{uid}"
 
+    @staticmethod
+    def tencent_index_username(
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> str:
+        return f"tencent:index:{provider.value}"
+
 
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")

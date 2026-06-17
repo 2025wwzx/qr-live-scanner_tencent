@@ -314,6 +314,7 @@ class MainWindow(QMainWindow):
         account_menu = QMenu("账号管理", self)
         account_menu.addAction("新增账号", self._show_add_account_dialog)
         account_menu.addAction("导入已保存账号", self._show_import_account_dialog)
+        account_menu.addAction("导入全部已保存账号", self._import_saved_tencent_accounts)
         account_menu.addAction("设为默认账号", self._set_selected_account_as_default)
         account_menu.addAction("删除账号", self._clear_selected_account)
         account_menu.addAction("本地账号自检", self._run_tencent_account_smoke_dialog)
@@ -573,6 +574,24 @@ class MainWindow(QMainWindow):
         self._refresh_account_table_row(uid)
         if self._account_table_row(uid) >= 0:
             self.statusBar().showMessage("本地已保存账号已导入")
+
+    def _import_saved_tencent_accounts(self) -> None:
+        provider = self._selected_provider()
+        try:
+            entries = self.account_store.list_tencent_sessions(provider)
+        except AccountStoreError:
+            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
+        if not entries:
+            self.statusBar().showMessage("未找到本地已保存账号")
+            return
+        for entry in entries:
+            if entry.provider is not provider:
+                continue
+            self._remember_account(entry.uid, provider)
+            self._set_account_table_row(entry.uid, "已保存" if entry.authorized else "未保存")
+        self._save_state()
+        self.statusBar().showMessage("已导入本地已保存账号")
 
     def _run_tencent_account_smoke_dialog(self) -> None:
         provider = self._selected_provider()

@@ -133,6 +133,23 @@ class AccountRef:
 
 
 @dataclass(frozen=True, slots=True)
+class TencentAccountIndexEntry:
+    """Local Tencent account index metadata without credentials."""
+
+    uid: str
+    provider: TencentLoginProvider = TencentLoginProvider.QQ
+    authorized: bool = False
+
+    def __post_init__(self) -> None:
+        normalized_uid = str(self.uid).strip()
+        if not normalized_uid:
+            msg = "Tencent account uid is required"
+            raise ValueError(msg)
+        object.__setattr__(self, "uid", normalized_uid)
+        object.__setattr__(self, "provider", TencentLoginProvider(str(self.provider)))
+
+
+@dataclass(frozen=True, slots=True)
 class ScanResult:
     candidate: QRCandidate
     account: AccountRef
@@ -214,3 +231,9 @@ class AccountStore(Protocol):
         provider: TencentLoginProvider = TencentLoginProvider.QQ,
     ) -> bool:
         """Return whether a Tencent session is authorized."""
+
+    def list_tencent_sessions(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> list[TencentAccountIndexEntry]:
+        """Return stored Tencent account metadata without credential values."""

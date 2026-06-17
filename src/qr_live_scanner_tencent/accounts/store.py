@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from typing import Any
 
 import keyring
 from keyring.errors import KeyringError, NoKeyringError, PasswordDeleteError
@@ -11,7 +13,12 @@ from qr_live_scanner_tencent.accounts.session import (
     load_tencent_session,
 )
 from qr_live_scanner_tencent.config import AccountConfig
-from qr_live_scanner_tencent.interfaces import AccountStoreError, GameID, TencentLoginProvider
+from qr_live_scanner_tencent.interfaces import (
+    AccountStoreError,
+    GameID,
+    TencentAccountIndexEntry,
+    TencentLoginProvider,
+)
 
 NO_KEYRING_MESSAGE = (
     "No usable keyring backend. Use FakeAccountStore in tests or configure OS keyring."
@@ -89,6 +96,22 @@ class FakeAccountStore:
         uid = _require_uid(uid)
         provider = _provider(provider)
         return (provider, uid) in self.authorized_tencent_accounts
+
+    def list_tencent_sessions(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> list[TencentAccountIndexEntry]:
+        provider = _provider(provider)
+        entries = [
+            TencentAccountIndexEntry(
+                uid=uid,
+                provider=entry_provider,
+                authorized=(entry_provider, uid) in self.authorized_tencent_accounts,
+            )
+            for entry_provider, uid in self.tencent_sessions
+            if entry_provider is provider
+        ]
+        return sorted(entries, key=lambda entry: entry.uid)
 
 
 @dataclass(slots=True)
@@ -173,6 +196,16 @@ class KeyringAccountStore:
                 self._tencent_authorization_username(uid, session.provider),
                 "1" if authorized else "0",
             )
+            entries = self._load_tencent_index(session.provider)
+            entries = [entry for entry in entries if entry.uid != uid]
+            entries.append(
+                TencentAccountIndexEntry(
+                    uid=uid,
+                    provider=session.provider,
+                    authorized=authorized,
+                )
+            )
+            self._save_tencent_index(session.provider, entries)
         except (NoKeyringError, KeyringError) as exc:
             raise AccountStoreError(NO_KEYRING_MESSAGE) from exc
 
@@ -186,6 +219,10 @@ class KeyringAccountStore:
         try:
             self._delete_password(self.config.tencent_keyring_username(uid, provider))
             self._delete_password(self._tencent_authorization_username(uid, provider))
+            entries = [
+                entry for entry in self._load_tencent_index(provider) if entry.uid != uid
+            ]
+            self._save_tencent_index(provider, entries)
         except (NoKeyringError, KeyringError) as exc:
             raise AccountStoreError(NO_KEYRING_MESSAGE) from exc
 
@@ -205,6 +242,16 @@ class KeyringAccountStore:
             raise AccountStoreError(NO_KEYRING_MESSAGE) from exc
         return value == "1"
 
+    def list_tencent_sessions(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> list[TencentAccountIndexEntry]:
+        provider = _provider(provider)
+        try:
+            return self._load_tencent_index(provider)
+        except (NoKeyringError, KeyringError) as exc:
+            raise AccountStoreError(NO_KEYRING_MESSAGE) from exc
+
     @staticmethod
     def _authorization_username(game_id: GameID, uid: str) -> str:
         return f"authorized:{game_id.value}:{uid}"
@@ -222,6 +269,54 @@ class KeyringAccountStore:
             keyring.delete_password(self.config.keyring_service, username)
         except PasswordDeleteError:
             return
+
+    def _load_tencent_index(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> list[TencentAccountIndexEntry]:
+        provider = _provider(provider)
+        value = keyring.get_password(
+            self.config.keyring_service,
+            self.config.tencent_index_username(provider),
+        )
+        if value is None:
+            return []
+        try:
+            raw_entries = json.loads(value)
+            if not isinstance(raw_entries, list):
+                raise ValueError
+            entries = [_load_tencent_index_entry(item) for item in raw_entries]
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            msg = "stored Tencent account index is invalid"
+            raise AccountStoreError(msg) from exc
+        return sorted(
+            [entry for entry in entries if entry.provider is provider],
+            key=lambda entry: entry.uid,
+        )
+
+    def _save_tencent_index(
+        self,
+        provider: TencentLoginProvider,
+        entries: list[TencentAccountIndexEntry],
+    ) -> None:
+        provider = _provider(provider)
+        normalized = sorted(
+            [entry for entry in entries if entry.provider is provider],
+            key=lambda entry: entry.uid,
+        )
+        payload = [
+            {
+                "authorized": entry.authorized,
+                "provider": entry.provider.value,
+                "uid": entry.uid,
+            }
+            for entry in normalized
+        ]
+        keyring.set_password(
+            self.config.keyring_service,
+            self.config.tencent_index_username(provider),
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        )
 
 
 def _provider(provider: TencentLoginProvider) -> TencentLoginProvider:
@@ -251,3 +346,13 @@ def _require_tencent_session(session: object) -> TencentSession:
         msg = "Tencent session is required"
         raise AccountStoreError(msg)
     return session
+
+
+def _load_tencent_index_entry(raw: Any) -> TencentAccountIndexEntry:
+    if not isinstance(raw, dict):
+        raise ValueError
+    return TencentAccountIndexEntry(
+        uid=str(raw.get("uid") or ""),
+        provider=TencentLoginProvider(str(raw.get("provider") or TencentLoginProvider.QQ)),
+        authorized=bool(raw.get("authorized")),
+    )
