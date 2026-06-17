@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from qr_live_scanner_tencent.__main__ import main
+from qr_live_scanner_tencent.accounts import (
+    TencentAccountQRLoginError,
+    load_tencent_account_qr_login_config,
+)
 from qr_live_scanner_tencent.interfaces import TencentLoginProvider
+from qr_live_scanner_tencent.security import protocol_sample
 from qr_live_scanner_tencent.security.protocol_sample import (
     build_tencent_protocol_sample_from_har,
     render_tencent_protocol_note,
@@ -367,3 +372,165 @@ def test_protocol_note_cli_rejects_invalid_sample_without_writing_output(
     assert exit_code == 2
     assert not output_path.exists()
     assert "protocol sample" in output.lower()
+
+
+def test_account_qr_config_skeleton_uses_safe_defaults_without_sensitive_values(
+    tmp_path: Path,
+) -> None:
+    sample = {
+        "source": "redacted-har",
+        "provider": "qq",
+        "flow": "account-login",
+        "entries": [
+            {
+                "index": 0,
+                "method": "GET",
+                "scheme": "https",
+                "host": "ssl.ptlogin2.qq.com",
+                "path": "/ptqrshow",
+                "query_keys": ["appid", "token"],
+                "request_header_names": ["cookie", "user-agent"],
+                "request_body_mime_type": "",
+                "has_request_body": False,
+                "response_status": 200,
+                "response_header_names": [],
+                "response_body_mime_type": "image/png",
+            },
+            {
+                "index": 1,
+                "method": "GET",
+                "scheme": "https",
+                "host": "ssl.ptlogin2.qq.com",
+                "path": "/ptqrlogin",
+                "query_keys": ["qrsig", "ticket"],
+                "request_header_names": ["cookie"],
+                "request_body_mime_type": "",
+                "has_request_body": False,
+                "response_status": 200,
+                "response_header_names": [],
+                "response_body_mime_type": "application/javascript",
+            },
+        ],
+    }
+
+    assert hasattr(protocol_sample, "render_tencent_account_qr_config_skeleton")
+    skeleton = protocol_sample.render_tencent_account_qr_config_skeleton(sample)
+    lower_skeleton = skeleton.lower()
+
+    assert "[account_qr_login.qq]" in skeleton
+    assert "validated_protocol = false" in skeleton
+    assert 'fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow"' in skeleton
+    assert 'query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"' in skeleton
+    assert 'app_id = "TODO-verified-app-id"' in skeleton
+    assert "?" not in skeleton
+    assert "#" not in skeleton
+    assert "[REDACTED]" not in skeleton
+    assert "token" not in lower_skeleton
+    assert "ticket" not in lower_skeleton
+    assert "cookie" not in lower_skeleton
+    assert "qrsig" not in lower_skeleton
+
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(skeleton, encoding="utf-8")
+    with pytest.raises(TencentAccountQRLoginError) as exc_info:
+        load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
+
+    assert "not validated" in str(exc_info.value)
+
+
+def test_account_qr_config_skeleton_cli_writes_safe_toml(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sample_path = tmp_path / "tencent-login.sample.json"
+    output_path = tmp_path / "tencent-account-login.toml"
+    sample_path.write_text(
+        json.dumps(
+            {
+                "source": "redacted-har",
+                "provider": "wechat",
+                "flow": "account-login",
+                "entries": [
+                    {
+                        "index": 0,
+                        "method": "POST",
+                        "scheme": "https",
+                        "host": "open.weixin.qq.com",
+                        "path": "/connect/qrconnect",
+                        "query_keys": ["appid", "redirect_uri"],
+                        "request_header_names": ["cookie"],
+                        "request_body_mime_type": "",
+                        "has_request_body": False,
+                        "response_status": 200,
+                        "response_header_names": [],
+                        "response_body_mime_type": "text/html",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-skeleton",
+            "--input",
+            str(sample_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert output_path.exists()
+    assert "Tencent protocol config skeleton written" in output
+    skeleton = output_path.read_text(encoding="utf-8")
+    assert "[account_qr_login.wechat]" in skeleton
+    assert "validated_protocol = false" in skeleton
+    assert "open.weixin.qq.com/connect/qrconnect" in skeleton
+    assert "?" not in skeleton
+    assert "cookie" not in skeleton.lower()
+
+
+def test_account_qr_config_skeleton_cli_rejects_invalid_sample_without_writing_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sample_path = tmp_path / "bad.sample.json"
+    output_path = tmp_path / "bad.toml"
+    sample_path.write_text(
+        json.dumps(
+            {
+                "source": "redacted-har",
+                "provider": "qq",
+                "flow": "game-scan-confirm",
+                "entries": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-skeleton",
+            "--input",
+            str(sample_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert not output_path.exists()
+    assert "protocol sample" in output.lower()
+
+
+def _run_main(argv: list[str]) -> int:
+    try:
+        return main(argv)
+    except SystemExit as exc:
+        if isinstance(exc.code, int):
+            return exc.code
+        return 1

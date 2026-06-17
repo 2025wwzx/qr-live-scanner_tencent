@@ -101,12 +101,24 @@ qr-live-scanner-tencent tencent-protocol-note `
   --output captures/tencent-login.note.md
 ```
 
+Then render a non-sensitive local TOML skeleton for account QR login config:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-config-skeleton `
+  --input captures/tencent-login.sample.json `
+  --output profiles/tencent-account-login.toml
+```
+
 The sample file keeps only method, host, path, query/header names, status code,
 and MIME type. It rejects unredacted Cookie, token, ticket, account ID, UID,
 QR payload, request body text, and signed URL fragments before writing output.
 The note file is a checklist template for recording endpoint purpose, request
 body fields, response schema, success condition, credential family, and risk
 checks without copying raw values.
+The config skeleton keeps only provider section, `validated_protocol = false`,
+clean endpoint URLs without query strings or fragments, and an app ID
+placeholder. It must be manually verified and edited before it can be used for
+real HTTP.
 
 Inspect only the redacted file. Raw HAR, Cookie, token, QR payload, account ID,
 and full query strings must stay local and must not be committed.

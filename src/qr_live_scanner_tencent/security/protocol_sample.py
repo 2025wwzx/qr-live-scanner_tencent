@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 
 from qr_live_scanner_tencent.interfaces import TencentLoginProvider
 from qr_live_scanner_tencent.security.har import (
@@ -23,6 +23,24 @@ PROTOCOL_NOTE_CHECKLIST_ITEMS = (
     "Credential family and expiry behavior documented",
     "Risk, captcha, device, signature, and app-version checks documented",
     "Real HTTP remains gated until all fields are verified",
+)
+ACCOUNT_QR_CONFIG_SKELETON_APP_ID = "TODO-verified-app-id"
+ACCOUNT_QR_FETCH_ENDPOINT_KEYWORDS = (
+    "fetch",
+    "create",
+    "show",
+    "qrshow",
+    "ptqrshow",
+    "qrcode",
+    "qrconnect",
+    "authorize",
+)
+ACCOUNT_QR_QUERY_ENDPOINT_KEYWORDS = (
+    "query",
+    "poll",
+    "status",
+    "login",
+    "ptqrlogin",
 )
 
 
@@ -119,6 +137,50 @@ def render_tencent_protocol_note(sample: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_tencent_account_qr_config_skeleton(sample: dict[str, Any]) -> str:
+    """将账号登录协议样本渲染为安全默认的本地 TOML 配置骨架。
+
+    输入必须来自 `tencent-protocol-sample --flow account-login`。输出只包含
+    `account_qr_login.<provider>` 允许的非敏感字段，并固定
+    `validated_protocol = false`，因此不会启用真实 QQ/微信 HTTP。
+    """
+
+    provider = TencentLoginProvider(_sample_text(sample, "provider"))
+    flow = _validate_flow(_sample_text(sample, "flow"))
+    source = _sample_text(sample, "source")
+    if source != "redacted-har" or flow != "account-login":
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+
+    entries = sample.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+
+    summary_entries = [_account_config_entry_from_summary(entry) for entry in entries]
+    fetch_url = _select_account_config_endpoint_url(
+        summary_entries,
+        provider=provider,
+        keywords=ACCOUNT_QR_FETCH_ENDPOINT_KEYWORDS,
+        fallback_kind="fetch",
+    )
+    query_url = _select_account_config_endpoint_url(
+        summary_entries,
+        provider=provider,
+        keywords=ACCOUNT_QR_QUERY_ENDPOINT_KEYWORDS,
+        fallback_kind="query",
+        excluded_url=fetch_url,
+    )
+
+    lines = [
+        f"[account_qr_login.{provider.value}]",
+        "validated_protocol = false",
+        f'fetch_url = "{_toml_string(fetch_url)}"',
+        f'query_url = "{_toml_string(query_url)}"',
+        f'app_id = "{ACCOUNT_QR_CONFIG_SKELETON_APP_ID}"',
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _validate_flow(flow: str) -> str:
     normalized = str(flow).strip().lower()
     if normalized not in ALLOWED_TENCENT_PROTOCOL_SAMPLE_FLOWS:
@@ -207,6 +269,64 @@ def _sample_entry_from_summary(value: Any) -> dict[str, Any]:
     ):
         raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
     return value
+
+
+def _account_config_entry_from_summary(value: Any) -> dict[str, Any]:
+    entry = _sample_entry_from_summary(value)
+    for field in ("scheme", "host", "path"):
+        _summary_text(entry, field)
+    return entry
+
+
+def _select_account_config_endpoint_url(
+    entries: list[dict[str, Any]],
+    *,
+    provider: TencentLoginProvider,
+    keywords: tuple[str, ...],
+    fallback_kind: str,
+    excluded_url: str | None = None,
+) -> str:
+    scored_entries = [
+        (
+            _account_endpoint_score(entry, keywords),
+            int(entry["index"]),
+            _account_config_endpoint_url(entry),
+        )
+        for entry in entries
+    ]
+    scored_entries.sort(key=lambda item: (-item[0], item[1]))
+    for score, _index, endpoint_url in scored_entries:
+        if score <= 0:
+            break
+        if endpoint_url != excluded_url:
+            return endpoint_url
+    return _account_config_fallback_url(provider, fallback_kind)
+
+
+def _account_endpoint_score(entry: dict[str, Any], keywords: tuple[str, ...]) -> int:
+    path = _summary_text(entry, "path").lower()
+    return sum(1 for keyword in keywords if keyword in path)
+
+
+def _account_config_endpoint_url(entry: dict[str, Any]) -> str:
+    scheme = _summary_text(entry, "scheme").lower()
+    host = _summary_text(entry, "host")
+    path = _summary_text(entry, "path")
+    if scheme not in ("http", "https"):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    if any(char in host for char in "?#\r\n") or any(char in path for char in "?#\r\n"):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    if not path.startswith("/"):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    return urlunsplit((scheme, host, path, "", ""))
+
+
+def _account_config_fallback_url(provider: TencentLoginProvider, kind: str) -> str:
+    return f"https://example.invalid/tencent/account/{provider.value}/qr/{kind}"
+
+
+def _toml_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _endpoint_table_row(entry: dict[str, Any]) -> str:
