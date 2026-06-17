@@ -94,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_status(args)
     if args.command == "tencent-delete":
         return _run_tencent_delete(args)
+    if args.command == "tencent-account-smoke":
+        return _run_tencent_account_smoke(args)
     parser.print_help()
     return 0
 
@@ -201,6 +203,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default=TencentLoginProvider.QQ.value,
     )
     tencent_delete_parser.add_argument("--uid", required=True)
+
+    tencent_account_smoke_parser = subparsers.add_parser("tencent-account-smoke")
+    tencent_account_smoke_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+    tencent_account_smoke_parser.add_argument("--uid", required=True)
+    tencent_account_smoke_parser.add_argument("--cleanup", action="store_true")
 
     redact_parser = subparsers.add_parser("redact-har")
     redact_parser.add_argument("--input", required=True)
@@ -730,6 +741,42 @@ def _run_tencent_delete(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent account delete failed: {exc}")
         return 2
     print("Tencent account session deleted")
+    return 0
+
+
+def _run_tencent_account_smoke(args: argparse.Namespace) -> int:
+    try:
+        provider = TencentLoginProvider(str(args.provider))
+        uid = _required_text(args.uid, "uid")
+        store = KeyringAccountStore()
+        store.save_tencent_session(
+            TencentSession(
+                uid=uid,
+                provider=provider,
+                credentials={"mock_session": "local-smoke-only"},
+            ),
+            authorized=True,
+        )
+        session = store.get_tencent_session(uid, provider)
+        if session is None:
+            print("[WARN] Tencent account local smoke failed: session missing")
+            return 1
+        if session.provider is not provider:
+            print("[WARN] Tencent account local smoke failed: provider mismatch")
+            return 1
+        if not store.is_tencent_authorized(uid, provider):
+            print("[WARN] Tencent account local smoke failed: authorization missing")
+            return 1
+        print("Tencent account local smoke passed")
+        if bool(args.cleanup):
+            store.delete_tencent_session(uid, provider)
+            print("Tencent account local smoke cleaned up")
+    except AccountStoreError:
+        print("[WARN] Tencent account local smoke failed: credential storage unavailable")
+        return 2
+    except ValueError as exc:
+        print(f"[WARN] Tencent account local smoke failed: {exc}")
+        return 2
     return 0
 
 

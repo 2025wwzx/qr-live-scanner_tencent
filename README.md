@@ -65,12 +65,15 @@ qr-live-scanner-tencent tencent-login --provider qq --dry-run --qr-output work/t
 qr-live-scanner-tencent tencent-login --provider wechat --mock-confirm --mock-uid local-wechat-user --qr-output work/tencent-login-qr.png
 qr-live-scanner-tencent tencent-status --provider qq --uid <local-account-id>
 qr-live-scanner-tencent tencent-delete --provider qq --uid <local-account-id>
+qr-live-scanner-tencent tencent-account-smoke --provider wechat --uid local-wechat-user --cleanup
 ```
 
 `--mock-confirm` 只保存本地 mock session，用于验证 keyring、GUI 账号表和
 自动确认 gate；它不代表 QQ/微信真实扫码协议已验证。
 `tencent-delete` 只清除本地保存的 TencentSession 和授权标记，不连接腾讯服务，
 也不会输出账号 ID、Cookie、token、ticket 或二维码 payload。
+`tencent-account-smoke` 只做本地保存、查询和可选清理，不创建真实 QR 登录服务，
+适合快速确认 QQ/微信账号信息保留链路。
 
 ### GUI 本地 mock 账号测试
 

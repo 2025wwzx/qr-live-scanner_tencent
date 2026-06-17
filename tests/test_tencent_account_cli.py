@@ -555,6 +555,118 @@ def test_tencent_delete_cli_redacts_storage_errors(
     assert "10001" not in output
 
 
+def test_tencent_account_smoke_cli_saves_verifies_and_cleans_up_without_http(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    operations: list[str] = []
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.sessions: dict[tuple[TencentLoginProvider, str], TencentSession] = {}
+            self.authorized: set[tuple[TencentLoginProvider, str]] = set()
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            assert session.provider is TencentLoginProvider.WECHAT
+            assert session.uid == "local-wechat-user"
+            assert session.credentials == {"mock_session": "local-smoke-only"}
+            operations.append("save")
+            key = (session.provider, session.uid)
+            self.sessions[key] = session
+            if authorized:
+                self.authorized.add(key)
+
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "local-wechat-user"
+            assert provider is TencentLoginProvider.WECHAT
+            operations.append("get")
+            return self.sessions.get((provider, uid))
+
+        def is_tencent_authorized(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> bool:
+            assert uid == "local-wechat-user"
+            assert provider is TencentLoginProvider.WECHAT
+            operations.append("authorized")
+            return (provider, uid) in self.authorized
+
+        def delete_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> None:
+            assert uid == "local-wechat-user"
+            assert provider is TencentLoginProvider.WECHAT
+            operations.append("delete")
+            self.sessions.pop((provider, uid), None)
+            self.authorized.discard((provider, uid))
+
+    fake_store = FakeStore()
+
+    def fail_if_real_service_is_created(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("local account smoke must not create a real QR login service")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", lambda: fake_store)
+    monkeypatch.setattr(
+        main_module,
+        "_new_tencent_account_qr_login_service",
+        fail_if_real_service_is_created,
+    )
+
+    exit_code = main(
+        [
+            "tencent-account-smoke",
+            "--provider",
+            "wechat",
+            "--uid",
+            "local-wechat-user",
+            "--cleanup",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert operations == ["save", "get", "authorized", "delete"]
+    assert fake_store.sessions == {}
+    assert fake_store.authorized == set()
+    assert "Tencent account local smoke passed" in output
+    assert "Tencent account local smoke cleaned up" in output
+    assert "local-wechat-user" not in output
+    assert "local-smoke-only" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_account_smoke_cli_redacts_storage_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            assert authorized is True
+            raise AccountStoreError("SECRET_ACCESS_TOKEN should not be visible")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-account-smoke", "--provider", "qq", "--uid", "10001"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "credential storage unavailable" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "10001" not in output
+
+
 async def test_tencent_login_cli_closes_service_when_qr_fetch_fails(tmp_path: Path) -> None:
     closed: list[bool] = []
 
