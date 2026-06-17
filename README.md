@@ -111,6 +111,10 @@ qr-live-scanner-tencent gui-snapshot --provider wechat --output-dir work/gui-sna
 qr-live-scanner-tencent gui-snapshot --provider wechat --mock-uid local-wechat-user --output-dir work/gui-snapshots
 ```
 
+快照会包含 `main-window.png`、`tencent-account-dialog-<provider>.png` 和
+`tencent-account-smoke-dialog-<provider>.png`，用于同时检查主窗口、账号二维码弹窗和
+本地账号自检弹窗。
+
 该命令会写入 `work/gui-snapshots`，只做离屏渲染，不连接直播平台、不访问
 keyring，也不发送 QQ/微信真实 HTTP。带 `--mock-uid` 时只在内存里的 fake store
 渲染“账号已保存”状态，不会保存真实凭证。

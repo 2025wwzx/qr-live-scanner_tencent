@@ -9,7 +9,11 @@ from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QWidget
 
 from qr_live_scanner_tencent.accounts import FakeAccountStore, TencentSession
-from qr_live_scanner_tencent.gui.main_window import MainWindow, TencentAccountDialog
+from qr_live_scanner_tencent.gui.main_window import (
+    MainWindow,
+    TencentAccountDialog,
+    TencentAccountSmokeDialog,
+)
 from qr_live_scanner_tencent.interfaces import TencentLoginProvider
 
 SNAPSHOT_FONT_FILES = (
@@ -72,12 +76,19 @@ def write_gui_snapshots(
         account_dialog._mock_confirm_local_session()
     account_dialog.resize(360, 460)
 
+    smoke_dialog = TencentAccountSmokeDialog(provider=normalized_provider)
+    if normalized_mock_uid:
+        smoke_dialog.uid_input.setText(normalized_mock_uid)
+    smoke_dialog.resize(360, 220)
+
     paths = [
         target_dir / "main-window.png",
         target_dir / f"tencent-account-dialog-{normalized_provider.value}.png",
+        target_dir / f"tencent-account-smoke-dialog-{normalized_provider.value}.png",
     ]
     _save_widget_png(main_window, paths[0], minimum_size=QSize(720, 820))
     _save_widget_png(account_dialog, paths[1], minimum_size=QSize(360, 460))
+    _save_widget_png(smoke_dialog, paths[2], minimum_size=QSize(360, 220))
     return paths
 
 
