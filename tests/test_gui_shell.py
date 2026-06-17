@@ -501,6 +501,41 @@ def test_main_window_clears_local_authorization(qtbot: QtBot) -> None:
     assert window.account_table.rowCount() == 0
     assert window.auto_confirm_checkbox.isEnabled() is False
     assert "本地账号已删除" in window.statusBar().currentMessage()
+    assert "可用账号 0 个" in window.statusBar().currentMessage()
+
+
+def test_main_window_delete_warns_when_index_still_contains_uid(qtbot: QtBot) -> None:
+    class StickyIndexStore(FakeAccountStore):
+        def repair_tencent_index(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentAccountIndexRepairResult:
+            assert provider is TencentLoginProvider.QQ
+            return TencentAccountIndexRepairResult(
+                provider=provider,
+                entries=[
+                    TencentAccountIndexEntry(
+                        uid="10001",
+                        provider=provider,
+                        authorized=False,
+                    )
+                ],
+            )
+
+    store = StickyIndexStore()
+    store.save_tencent_session(_tencent_session("10001"), authorized=True)
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window._refresh_account_table_row("10001")
+
+    window._clear_selected_account()
+
+    assert window.account_table.rowCount() == 1
+    message = window.statusBar().currentMessage()
+    assert "本地账号删除失败：索引清理未完成" in message
+    assert "10001" not in message
+    assert "token" not in message.lower()
+    assert "cookie" not in message.lower()
 
 
 def test_main_window_add_account_opens_qr_dialog_and_refreshes_account_table(

@@ -827,7 +827,7 @@ def test_tencent_delete_cli_removes_saved_session_without_echoing_identifiers(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    deleted: list[tuple[str, TencentLoginProvider]] = []
+    operations: list[str] = []
 
     class FakeStore:
         def delete_tencent_session(
@@ -835,7 +835,17 @@ def test_tencent_delete_cli_removes_saved_session_without_echoing_identifiers(
             uid: str,
             provider: TencentLoginProvider = TencentLoginProvider.QQ,
         ) -> None:
-            deleted.append((uid, provider))
+            assert uid == "local-wechat-user"
+            assert provider is TencentLoginProvider.WECHAT
+            operations.append("delete")
+
+        def repair_tencent_index(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentAccountIndexRepairResult:
+            assert provider is TencentLoginProvider.WECHAT
+            operations.append("repair")
+            return TencentAccountIndexRepairResult(provider=provider, entries=[])
 
     monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
 
@@ -843,8 +853,52 @@ def test_tencent_delete_cli_removes_saved_session_without_echoing_identifiers(
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert deleted == [("local-wechat-user", TencentLoginProvider.WECHAT)]
+    assert operations == ["delete", "repair"]
     assert "Tencent account session deleted" in output
+    assert "Tencent account index cleanup verified" in output
+    assert "local-wechat-user" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_delete_cli_fails_when_index_still_contains_deleted_uid(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def delete_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> None:
+            assert uid == "local-wechat-user"
+            assert provider is TencentLoginProvider.WECHAT
+
+        def repair_tencent_index(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentAccountIndexRepairResult:
+            assert provider is TencentLoginProvider.WECHAT
+            return TencentAccountIndexRepairResult(
+                provider=provider,
+                entries=[
+                    TencentAccountIndexEntry(
+                        uid="local-wechat-user",
+                        provider=provider,
+                        authorized=False,
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-delete", "--provider", "wechat", "--uid", "local-wechat-user"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "index cleanup missing" in output
     assert "local-wechat-user" not in output
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()

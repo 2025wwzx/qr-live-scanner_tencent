@@ -521,8 +521,12 @@ class MainWindow(QMainWindow):
         provider = self._selected_provider()
         try:
             self.account_store.delete_tencent_session(uid, provider)
+            repair_result = self.account_store.repair_tencent_index(provider)
         except AccountStoreError:
             self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
+        if _tencent_index_repair_result_contains(repair_result, uid, provider):
+            self.statusBar().showMessage("本地账号删除失败：索引清理未完成")
             return
 
         row = self._account_table_row(uid)
@@ -536,7 +540,9 @@ class MainWindow(QMainWindow):
         self._sync_default_account_marks()
         self._sync_selected_account_label()
         self._save_state()
-        self.statusBar().showMessage("本地账号已删除")
+        self.statusBar().showMessage(
+            _tencent_index_repair_status_message("本地账号已删除", repair_result)
+        )
 
     def _show_add_account_dialog(self) -> None:
         dialog = TencentAccountDialog(
@@ -1006,6 +1012,14 @@ def _tencent_index_repair_status_message(
     if result.removed_stale_entries > 0:
         parts.append(f"清理陈旧索引 {result.removed_stale_entries} 个")
     return "；".join(parts)
+
+
+def _tencent_index_repair_result_contains(
+    result: TencentAccountIndexRepairResult,
+    uid: str,
+    provider: TencentLoginProvider,
+) -> bool:
+    return any(entry.provider is provider and entry.uid == uid for entry in result.entries)
 
 
 class _ManualTencentAccountDialog(QDialog):

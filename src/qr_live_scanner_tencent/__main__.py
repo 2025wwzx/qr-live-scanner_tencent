@@ -33,6 +33,7 @@ from qr_live_scanner_tencent.interfaces import (
     GameID,
     QRLiveScannerError,
     ROIConfig,
+    TencentAccountIndexRepairResult,
     TencentLoginProvider,
 )
 from qr_live_scanner_tencent.security import (
@@ -812,7 +813,12 @@ def _run_tencent_delete(args: argparse.Namespace) -> int:
     try:
         provider = TencentLoginProvider(str(args.provider))
         uid = _required_text(args.uid, "uid")
-        KeyringAccountStore().delete_tencent_session(uid, provider)
+        store = KeyringAccountStore()
+        store.delete_tencent_session(uid, provider)
+        repair_result = store.repair_tencent_index(provider)
+        if _tencent_account_index_result_contains(repair_result, uid, provider):
+            print("[WARN] Tencent account delete failed: index cleanup missing")
+            return 1
     except AccountStoreError:
         print("[WARN] Tencent account delete failed: credential storage unavailable")
         return 2
@@ -820,6 +826,7 @@ def _run_tencent_delete(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent account delete failed: {exc}")
         return 2
     print("Tencent account session deleted")
+    print("Tencent account index cleanup verified")
     return 0
 
 
@@ -886,6 +893,14 @@ def _tencent_account_index_contains(
         if entry.provider is provider and entry.uid == uid:
             return authorized is None or entry.authorized is authorized
     return False
+
+
+def _tencent_account_index_result_contains(
+    result: TencentAccountIndexRepairResult,
+    uid: str,
+    provider: TencentLoginProvider,
+) -> bool:
+    return any(entry.provider is provider and entry.uid == uid for entry in result.entries)
 
 
 def _new_tencent_account_qr_login_service(
