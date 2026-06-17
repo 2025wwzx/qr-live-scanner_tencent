@@ -128,7 +128,8 @@ UID，请先删除该 provider/UID 的本地 session。
 登录渠道下可以直接使用“账号管理” -> “导入全部已保存账号”，把索引里的当前
 provider 账号加入 GUI 账号表。这个本地账号索引只保存 provider、UID 和授权状态，
 不保存 Cookie、token、ticket、二维码 payload 或其它凭证；早期版本已经保存但
-尚未写入索引的账号，仍可用“导入已保存账号”手动输入 UID 导入。
+尚未写入索引的账号，仍可用“导入已保存账号”手动输入 UID 导入，也可以通过
+`tencent-status` 查询后回填本地账号索引。
 
 也可以直接在 GUI 的“账号管理”菜单使用“本地账号自检”写入本地 mock
 TencentSession，用于验证账号表、provider 隔离和授权状态；如需复用测试 UID，

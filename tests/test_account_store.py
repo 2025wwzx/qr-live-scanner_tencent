@@ -208,6 +208,59 @@ def test_keyring_account_store_saves_tencent_session_under_tencent_namespace(
     assert calls[1] == ("qr-live-scanner-tencent", "authorized:tencent:qq:tencent-uid", "1")
 
 
+def test_keyring_account_store_get_backfills_legacy_tencent_session_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_calls: list[tuple[str, str, str]] = []
+
+    def fake_get_password(service: str, username: str) -> str | None:
+        assert service == "qr-live-scanner-tencent"
+        if username == "tencent:qq:legacy-user":
+            return json.dumps(
+                {
+                    "uid": "legacy-user",
+                    "provider": "qq",
+                    "credentials": {"access_token": "SECRET_ACCESS_TOKEN"},
+                }
+            )
+        if username == "authorized:tencent:qq:legacy-user":
+            return "1"
+        if username == "tencent:index:qq":
+            return None
+        raise AssertionError(f"unexpected keyring username: {username}")
+
+    def fake_set_password(service: str, username: str, password: str) -> None:
+        set_calls.append((service, username, password))
+
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.get_password",
+        fake_get_password,
+    )
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.set_password",
+        fake_set_password,
+    )
+    store = KeyringAccountStore()
+
+    session = store.get_tencent_session("legacy-user", TencentLoginProvider.QQ)
+
+    assert session is not None
+    assert session.uid == "legacy-user"
+    assert set_calls == [
+        (
+            "qr-live-scanner-tencent",
+            "tencent:index:qq",
+            json.dumps(
+                [{"authorized": True, "provider": "qq", "uid": "legacy-user"}],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    ]
+    assert "SECRET_ACCESS_TOKEN" not in set_calls[0][2]
+
+
 def test_keyring_account_store_saves_tencent_account_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -177,10 +178,18 @@ class KeyringAccountStore:
         if value is None:
             return None
         try:
-            return load_tencent_session(value)
+            session = load_tencent_session(value)
         except ValueError as exc:
             msg = "stored Tencent session is invalid"
             raise AccountStoreError(msg) from exc
+        if session.provider is provider:
+            with suppress(AccountStoreError, NoKeyringError, KeyringError):
+                self._remember_tencent_index_entry(
+                    uid=session.uid,
+                    provider=session.provider,
+                    authorized=self._read_tencent_authorized_flag(session.uid, session.provider),
+                )
+        return session
 
     def save_tencent_session(self, session: object, *, authorized: bool) -> None:
         session = _require_tencent_session(session)
@@ -196,16 +205,11 @@ class KeyringAccountStore:
                 self._tencent_authorization_username(uid, session.provider),
                 "1" if authorized else "0",
             )
-            entries, _ = self._load_tencent_index_for_repair(session.provider)
-            entries = [entry for entry in entries if entry.uid != uid]
-            entries.append(
-                TencentAccountIndexEntry(
-                    uid=uid,
-                    provider=session.provider,
-                    authorized=authorized,
-                )
+            self._remember_tencent_index_entry(
+                uid=uid,
+                provider=session.provider,
+                authorized=authorized,
             )
-            self._save_tencent_index(session.provider, entries)
         except (NoKeyringError, KeyringError) as exc:
             raise AccountStoreError(NO_KEYRING_MESSAGE) from exc
 
@@ -242,6 +246,20 @@ class KeyringAccountStore:
         except (NoKeyringError, KeyringError) as exc:
             raise AccountStoreError(NO_KEYRING_MESSAGE) from exc
         return value == "1"
+
+    def _read_tencent_authorized_flag(
+        self,
+        uid: str,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> bool:
+        provider = _provider(provider)
+        return (
+            keyring.get_password(
+                self.config.keyring_service,
+                self._tencent_authorization_username(uid, provider),
+            )
+            == "1"
+        )
 
     def list_tencent_sessions(
         self,
@@ -333,6 +351,25 @@ class KeyringAccountStore:
             self.config.tencent_index_username(provider),
             json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
         )
+
+    def _remember_tencent_index_entry(
+        self,
+        uid: str,
+        provider: TencentLoginProvider,
+        *,
+        authorized: bool,
+    ) -> None:
+        provider = _provider(provider)
+        entries, _ = self._load_tencent_index_for_repair(provider)
+        entries = [entry for entry in entries if entry.uid != uid]
+        entries.append(
+            TencentAccountIndexEntry(
+                uid=uid,
+                provider=provider,
+                authorized=authorized,
+            )
+        )
+        self._save_tencent_index(provider, entries)
 
     def _tencent_session_exists(
         self,
