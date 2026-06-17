@@ -160,6 +160,55 @@ def test_tencent_login_cli_mock_confirm_does_not_overwrite_existing_session(
     assert "payload" not in output.lower()
 
 
+def test_tencent_login_cli_mock_confirm_removes_qr_when_save_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "failed-save-login.png"
+
+    class FailingStore:
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "local-qq-user"
+            assert provider is TencentLoginProvider.QQ
+            return None
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            assert authorized is True
+            raise AccountStoreError("SECRET_ACCESS_TOKEN should not be visible")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FailingStore)
+
+    exit_code = _run_main(
+        [
+            "tencent-login",
+            "--provider",
+            "qq",
+            "--mock-confirm",
+            "--mock-uid",
+            "local-qq-user",
+            "--qr-output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert output_path.exists() is False
+    assert "credential storage unavailable" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "local-qq-user" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
 def test_tencent_login_cli_mock_confirm_requires_mock_uid_before_writing_qr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

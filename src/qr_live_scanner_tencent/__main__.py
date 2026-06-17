@@ -7,6 +7,7 @@ import math
 import os
 import re
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
 
@@ -716,6 +717,8 @@ def _run_tencent_login_mock_confirm(
             authorized=True,
         )
     except AccountStoreError:
+        with suppress(OSError):
+            qr_output_path.unlink(missing_ok=True)
         print("[WARN] mock Tencent account session failed: credential storage unavailable")
         return 2
     print(f"Tencent account QR mock image written: {qr_output_path}")
