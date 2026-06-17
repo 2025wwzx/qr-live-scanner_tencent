@@ -635,12 +635,11 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
             float(args.poll_interval_seconds)
         )
         if bool(args.mock_confirm):
-            _run_tencent_login_mock_confirm(
+            return _run_tencent_login_mock_confirm(
                 provider=provider,
                 qr_output_path=qr_output_path,
                 mock_uid=_required_text(args.mock_uid, "mock uid is required"),
             )
-            return 0
 
         if bool(args.dry_run):
             service = TencentAccountQRLoginService.dry_run(
@@ -684,7 +683,16 @@ def _run_tencent_login_mock_confirm(
     provider: TencentLoginProvider,
     qr_output_path: Path,
     mock_uid: str,
-) -> None:
+) -> int:
+    try:
+        store = KeyringAccountStore()
+        if store.get_tencent_session(mock_uid, provider) is not None:
+            print("[WARN] mock Tencent account session failed: session already exists")
+            return 1
+    except AccountStoreError:
+        print("[WARN] mock Tencent account session failed: credential storage unavailable")
+        return 2
+
     service = TencentAccountQRLoginService.dry_run(
         provider=provider,
         device_id_store=LocalDeviceIdStore.default(),
@@ -695,16 +703,21 @@ def _run_tencent_login_mock_confirm(
     finally:
         asyncio.run(service.aclose())
 
-    KeyringAccountStore().save_tencent_session(
-        TencentSession(
-            uid=mock_uid,
-            provider=provider,
-            credentials={"mock_session": "local-mock-only"},
-        ),
-        authorized=True,
-    )
+    try:
+        store.save_tencent_session(
+            TencentSession(
+                uid=mock_uid,
+                provider=provider,
+                credentials={"mock_session": "local-mock-only"},
+            ),
+            authorized=True,
+        )
+    except AccountStoreError:
+        print("[WARN] mock Tencent account session failed: credential storage unavailable")
+        return 2
     print(f"Tencent account QR mock image written: {qr_output_path}")
     print("mock Tencent account session saved")
+    return 0
 
 
 def _run_tencent_status(args: argparse.Namespace) -> int:

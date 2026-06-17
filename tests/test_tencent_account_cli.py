@@ -51,6 +51,15 @@ def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
     saved: list[tuple[TencentSession, bool]] = []
 
     class FakeStore:
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "local-wechat-user"
+            assert provider is TencentLoginProvider.WECHAT
+            return None
+
         def save_tencent_session(self, session: object, *, authorized: bool) -> None:
             assert isinstance(session, TencentSession)
             saved.append((session, authorized))
@@ -91,6 +100,60 @@ def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
     assert "mock Tencent account session saved" in output
     assert "local-wechat-user" not in output
     assert "local-mock-only" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_login_cli_mock_confirm_does_not_overwrite_existing_session(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "existing-qq-login.png"
+    operations: list[str] = []
+
+    class FakeStore:
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "existing-qq-user"
+            assert provider is TencentLoginProvider.QQ
+            operations.append("get")
+            return TencentSession(
+                uid=uid,
+                provider=provider,
+                credentials={"access_token": "SECRET_ACCESS_TOKEN"},
+            )
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            raise AssertionError("existing Tencent session must not be overwritten")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = _run_main(
+        [
+            "tencent-login",
+            "--provider",
+            "qq",
+            "--mock-confirm",
+            "--mock-uid",
+            "existing-qq-user",
+            "--qr-output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert operations == ["get"]
+    assert not output_path.exists()
+    assert "already exists" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "existing-qq-user" not in output
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()
     assert "ticket" not in output.lower()
