@@ -16,6 +16,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "mock TencentSession" in readme
     assert "tencent-account-smoke" in readme
     assert "tencent-list --provider wechat" in readme
+    assert "清理陈旧索引" in readme
     assert "默认不会覆盖已有同 provider/UID 的" in readme
     assert "`--mock-confirm` 默认不会覆盖已有同" in readme
     assert "provider/UID 的 TencentSession" in readme

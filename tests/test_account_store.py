@@ -244,6 +244,66 @@ def test_keyring_account_store_saves_tencent_account_index(
     assert "SECRET_ACCESS_TOKEN" not in calls[2][2]
 
 
+def test_keyring_account_store_list_filters_stale_tencent_index_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_calls: list[tuple[str, str, str]] = []
+
+    def fake_get_password(service: str, username: str) -> str | None:
+        assert service == "qr-live-scanner-tencent"
+        if username == "tencent:index:qq":
+            return json.dumps(
+                [
+                    {"uid": "keep-user", "provider": "qq", "authorized": True},
+                    {"uid": "stale-user", "provider": "qq", "authorized": True},
+                ]
+            )
+        if username == "tencent:qq:keep-user":
+            return json.dumps(
+                {
+                    "uid": "keep-user",
+                    "provider": "qq",
+                    "credentials": {"access_token": "SECRET_ACCESS_TOKEN"},
+                }
+            )
+        if username == "tencent:qq:stale-user":
+            return None
+        raise AssertionError(f"unexpected keyring username: {username}")
+
+    def fake_set_password(service: str, username: str, password: str) -> None:
+        set_calls.append((service, username, password))
+
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.get_password",
+        fake_get_password,
+    )
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.set_password",
+        fake_set_password,
+    )
+    store = KeyringAccountStore()
+
+    entries = store.list_tencent_sessions(TencentLoginProvider.QQ)
+
+    assert len(entries) == 1
+    assert entries[0].uid == "keep-user"
+    assert entries[0].authorized is True
+    assert set_calls == [
+        (
+            "qr-live-scanner-tencent",
+            "tencent:index:qq",
+            json.dumps(
+                [{"authorized": True, "provider": "qq", "uid": "keep-user"}],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    ]
+    assert "SECRET_ACCESS_TOKEN" not in set_calls[0][2]
+    assert "stale-user" not in set_calls[0][2]
+
+
 def test_keyring_account_store_deletes_tencent_session_without_touching_game_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

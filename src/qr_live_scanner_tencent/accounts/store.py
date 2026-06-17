@@ -248,7 +248,13 @@ class KeyringAccountStore:
     ) -> list[TencentAccountIndexEntry]:
         provider = _provider(provider)
         try:
-            return self._load_tencent_index(provider)
+            entries = self._load_tencent_index(provider)
+            existing_entries = [
+                entry for entry in entries if self._tencent_session_exists(entry.uid, provider)
+            ]
+            if len(existing_entries) != len(entries):
+                self._save_tencent_index(provider, existing_entries)
+            return existing_entries
         except (NoKeyringError, KeyringError) as exc:
             raise AccountStoreError(NO_KEYRING_MESSAGE) from exc
 
@@ -316,6 +322,20 @@ class KeyringAccountStore:
             self.config.keyring_service,
             self.config.tencent_index_username(provider),
             json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        )
+
+    def _tencent_session_exists(
+        self,
+        uid: str,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> bool:
+        provider = _provider(provider)
+        return (
+            keyring.get_password(
+                self.config.keyring_service,
+                self.config.tencent_keyring_username(uid, provider),
+            )
+            is not None
         )
 
 
