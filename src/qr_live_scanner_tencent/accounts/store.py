@@ -18,6 +18,7 @@ from qr_live_scanner_tencent.interfaces import (
     AccountStoreError,
     GameID,
     TencentAccountIndexEntry,
+    TencentAccountIndexRepairResult,
     TencentLoginProvider,
 )
 
@@ -113,6 +114,16 @@ class FakeAccountStore:
             if entry_provider is provider
         ]
         return sorted(entries, key=lambda entry: entry.uid)
+
+    def repair_tencent_index(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> TencentAccountIndexRepairResult:
+        provider = _provider(provider)
+        return TencentAccountIndexRepairResult(
+            provider=provider,
+            entries=self.list_tencent_sessions(provider),
+        )
 
 
 @dataclass(slots=True)
@@ -265,15 +276,27 @@ class KeyringAccountStore:
         self,
         provider: TencentLoginProvider = TencentLoginProvider.QQ,
     ) -> list[TencentAccountIndexEntry]:
+        return self.repair_tencent_index(provider).entries
+
+    def repair_tencent_index(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> TencentAccountIndexRepairResult:
         provider = _provider(provider)
         try:
             entries, repaired = self._load_tencent_index_for_repair(provider)
             existing_entries = [
                 entry for entry in entries if self._tencent_session_exists(entry.uid, provider)
             ]
-            if repaired or len(existing_entries) != len(entries):
+            removed_stale_entries = len(entries) - len(existing_entries)
+            if repaired or removed_stale_entries > 0:
                 self._save_tencent_index(provider, existing_entries)
-            return existing_entries
+            return TencentAccountIndexRepairResult(
+                provider=provider,
+                entries=existing_entries,
+                rebuilt_index=repaired,
+                removed_stale_entries=removed_stale_entries,
+            )
         except (NoKeyringError, KeyringError) as exc:
             raise AccountStoreError(NO_KEYRING_MESSAGE) from exc
 

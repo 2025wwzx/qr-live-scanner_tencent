@@ -17,6 +17,8 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "tencent-account-smoke" in readme
     assert "账号索引验证" in readme
     assert "tencent-list --provider wechat" in readme
+    assert "tencent-repair-index --provider wechat" in readme
+    assert "检查账号索引" in readme
     assert "清理陈旧索引" in readme
     assert "安全重建该 provider 的索引" in readme
     assert "默认不会覆盖已有同 provider/UID 的" in readme

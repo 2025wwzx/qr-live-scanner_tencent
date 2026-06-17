@@ -14,6 +14,7 @@ from qr_live_scanner_tencent.accounts.tencent_qr_login import (
 from qr_live_scanner_tencent.interfaces import (
     AccountStoreError,
     TencentAccountIndexEntry,
+    TencentAccountIndexRepairResult,
     TencentLoginProvider,
 )
 
@@ -719,6 +720,70 @@ def test_tencent_list_cli_redacts_storage_errors(
     monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
 
     exit_code = _run_main(["tencent-list", "--provider", "qq"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "credential storage unavailable" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+
+
+def test_tencent_repair_index_cli_reports_counts_without_echoing_identifiers(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def repair_tencent_index(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentAccountIndexRepairResult:
+            assert provider is TencentLoginProvider.WECHAT
+            return TencentAccountIndexRepairResult(
+                provider=provider,
+                entries=[
+                    TencentAccountIndexEntry(
+                        uid="local-wechat-user",
+                        provider=provider,
+                        authorized=True,
+                    )
+                ],
+                rebuilt_index=True,
+                removed_stale_entries=2,
+            )
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-repair-index", "--provider", "wechat"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent account index checked" in output
+    assert "provider=wechat" in output
+    assert "sessions=1" in output
+    assert "rebuilt=yes" in output
+    assert "stale_removed=2" in output
+    assert "local-wechat-user" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_repair_index_cli_redacts_storage_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def repair_tencent_index(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentAccountIndexRepairResult:
+            raise AccountStoreError("SECRET_ACCESS_TOKEN should not be visible")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-repair-index", "--provider", "qq"])
     output = capsys.readouterr().out
 
     assert exit_code == 2

@@ -385,6 +385,70 @@ def test_keyring_account_store_list_repairs_corrupt_tencent_index(
     assert "SECRET_ACCESS_TOKEN" not in set_calls[0][2]
 
 
+def test_keyring_account_store_repair_reports_stale_entries_without_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_calls: list[tuple[str, str, str]] = []
+
+    def fake_get_password(service: str, username: str) -> str | None:
+        assert service == "qr-live-scanner-tencent"
+        if username == "tencent:index:qq":
+            return json.dumps(
+                [
+                    {"authorized": True, "provider": "qq", "uid": "keep-user"},
+                    {"authorized": True, "provider": "qq", "uid": "stale-user"},
+                ],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        if username == "tencent:qq:keep-user":
+            return json.dumps(
+                {
+                    "credentials": {"access_token": "SECRET_ACCESS_TOKEN"},
+                    "provider": "qq",
+                    "uid": "keep-user",
+                }
+            )
+        if username == "tencent:qq:stale-user":
+            return None
+        raise AssertionError(f"unexpected keyring username: {username}")
+
+    def fake_set_password(service: str, username: str, password: str) -> None:
+        set_calls.append((service, username, password))
+
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.get_password",
+        fake_get_password,
+    )
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.set_password",
+        fake_set_password,
+    )
+    store = KeyringAccountStore()
+
+    result = store.repair_tencent_index(TencentLoginProvider.QQ)
+
+    assert result.provider is TencentLoginProvider.QQ
+    assert result.rebuilt_index is False
+    assert result.removed_stale_entries == 1
+    assert [entry.uid for entry in result.entries] == ["keep-user"]
+    assert set_calls == [
+        (
+            "qr-live-scanner-tencent",
+            "tencent:index:qq",
+            json.dumps(
+                [{"authorized": True, "provider": "qq", "uid": "keep-user"}],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    ]
+    assert "SECRET_ACCESS_TOKEN" not in set_calls[0][2]
+    assert "stale-user" not in set_calls[0][2]
+
+
 def test_keyring_account_store_save_rebuilds_corrupt_tencent_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -94,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_login(args)
     if args.command == "tencent-list":
         return _run_tencent_list(args)
+    if args.command == "tencent-repair-index":
+        return _run_tencent_repair_index(args)
     if args.command == "tencent-status":
         return _run_tencent_status(args)
     if args.command == "tencent-delete":
@@ -194,6 +196,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     tencent_list_parser = subparsers.add_parser("tencent-list")
     tencent_list_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+
+    tencent_repair_index_parser = subparsers.add_parser("tencent-repair-index")
+    tencent_repair_index_parser.add_argument(
         "--provider",
         choices=[provider.value for provider in TencentLoginProvider],
         default=TencentLoginProvider.QQ.value,
@@ -753,6 +762,30 @@ def _run_tencent_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_tencent_repair_index(args: argparse.Namespace) -> int:
+    try:
+        provider = TencentLoginProvider(str(args.provider))
+        result = KeyringAccountStore().repair_tencent_index(provider)
+    except AccountStoreError:
+        print("[WARN] Tencent account index repair failed: credential storage unavailable")
+        return 2
+    except ValueError as exc:
+        print(f"[WARN] Tencent account index repair failed: {exc}")
+        return 2
+    print("Tencent account index checked")
+    print(
+        " ".join(
+            [
+                f"provider={result.provider.value}",
+                f"sessions={len(result.entries)}",
+                f"rebuilt={_yes_no(result.rebuilt_index)}",
+                f"stale_removed={result.removed_stale_entries}",
+            ]
+        )
+    )
+    return 0
+
+
 def _run_tencent_status(args: argparse.Namespace) -> int:
     try:
         provider = TencentLoginProvider(str(args.provider))
@@ -835,6 +868,10 @@ def _run_tencent_account_smoke(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent account local smoke failed: {exc}")
         return 2
     return 0
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
 
 
 def _tencent_account_index_contains(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -150,6 +151,25 @@ class TencentAccountIndexEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class TencentAccountIndexRepairResult:
+    """Local Tencent account index repair summary without credentials."""
+
+    provider: TencentLoginProvider = TencentLoginProvider.QQ
+    entries: list[TencentAccountIndexEntry] = dataclass_field(default_factory=list)
+    rebuilt_index: bool = False
+    removed_stale_entries: int = 0
+
+    def __post_init__(self) -> None:
+        provider = TencentLoginProvider(str(self.provider))
+        removed_stale_entries = int(self.removed_stale_entries)
+        if removed_stale_entries < 0:
+            msg = "removed stale entry count must be >= 0"
+            raise ValueError(msg)
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "removed_stale_entries", removed_stale_entries)
+
+
+@dataclass(frozen=True, slots=True)
 class ScanResult:
     candidate: QRCandidate
     account: AccountRef
@@ -237,3 +257,9 @@ class AccountStore(Protocol):
         provider: TencentLoginProvider = TencentLoginProvider.QQ,
     ) -> list[TencentAccountIndexEntry]:
         """Return stored Tencent account metadata without credential values."""
+
+    def repair_tencent_index(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> TencentAccountIndexRepairResult:
+        """Repair and summarize local Tencent account index metadata."""

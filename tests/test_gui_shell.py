@@ -28,6 +28,7 @@ from qr_live_scanner_tencent.interfaces import (
     GameID,
     ROIConfig,
     TencentAccountIndexEntry,
+    TencentAccountIndexRepairResult,
     TencentLoginProvider,
 )
 
@@ -85,6 +86,12 @@ class FailingAccountStore:
         self,
         provider: TencentLoginProvider = TencentLoginProvider.QQ,
     ) -> list[TencentAccountIndexEntry]:
+        raise AccountStoreError("SECRET_TOKEN_VALUE should not be visible")
+
+    def repair_tencent_index(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> TencentAccountIndexRepairResult:
         raise AccountStoreError("SECRET_TOKEN_VALUE should not be visible")
 
 
@@ -241,10 +248,11 @@ def test_main_window_contains_core_controls(qtbot: QtBot) -> None:
     account_menu = window.menuBar().actions()[0].menu()
     assert account_menu is not None
     assert isinstance(account_menu, QMenu)
-    assert [action.text() for action in account_menu.actions()[:7]] == [
+    assert [action.text() for action in account_menu.actions()[:8]] == [
         "新增账号",
         "导入已保存账号",
         "导入全部已保存账号",
+        "检查账号索引",
         "设为默认账号",
         "删除账号",
         "本地账号自检",
@@ -650,6 +658,88 @@ def test_main_window_imports_all_saved_tencent_accounts_for_selected_provider(
     assert "SECRET_WECHAT_TOKEN" not in window.statusBar().currentMessage()
     assert "token" not in window.statusBar().currentMessage().lower()
     assert "cookie" not in window.statusBar().currentMessage().lower()
+
+
+def test_main_window_import_all_reports_index_repair_without_identifiers(
+    qtbot: QtBot,
+) -> None:
+    class RepairReportingStore(FakeAccountStore):
+        def repair_tencent_index(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentAccountIndexRepairResult:
+            assert provider is TencentLoginProvider.WECHAT
+            return TencentAccountIndexRepairResult(
+                provider=provider,
+                entries=[
+                    TencentAccountIndexEntry(
+                        uid="local-wechat-user",
+                        provider=provider,
+                        authorized=True,
+                    )
+                ],
+                rebuilt_index=True,
+                removed_stale_entries=2,
+            )
+
+    window = MainWindow(account_store=RepairReportingStore())
+    qtbot.addWidget(window)
+    provider_index = window.provider_combo.findData(TencentLoginProvider.WECHAT.value)
+    assert provider_index >= 0
+    window.provider_combo.setCurrentIndex(provider_index)
+
+    window._import_saved_tencent_accounts()
+
+    assert window.account_table.rowCount() == 1
+    message = window.statusBar().currentMessage()
+    assert "已导入本地已保存账号" in message
+    assert "可用账号 1 个" in message
+    assert "已重建索引" in message
+    assert "清理陈旧索引 2 个" in message
+    assert "local-wechat-user" not in message
+    assert "token" not in message.lower()
+    assert "cookie" not in message.lower()
+    assert "ticket" not in message.lower()
+    assert "payload" not in message.lower()
+
+
+def test_main_window_repairs_tencent_index_without_echoing_identifiers(
+    qtbot: QtBot,
+) -> None:
+    class RepairReportingStore(FakeAccountStore):
+        def repair_tencent_index(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentAccountIndexRepairResult:
+            assert provider is TencentLoginProvider.QQ
+            return TencentAccountIndexRepairResult(
+                provider=provider,
+                entries=[
+                    TencentAccountIndexEntry(
+                        uid="local-qq-user",
+                        provider=provider,
+                        authorized=False,
+                    )
+                ],
+                rebuilt_index=False,
+                removed_stale_entries=1,
+            )
+
+    window = MainWindow(account_store=RepairReportingStore())
+    qtbot.addWidget(window)
+    provider_index = window.provider_combo.findData(TencentLoginProvider.QQ.value)
+    assert provider_index >= 0
+    window.provider_combo.setCurrentIndex(provider_index)
+
+    window._repair_tencent_account_index()
+
+    message = window.statusBar().currentMessage()
+    assert "账号索引已检查" in message
+    assert "可用账号 1 个" in message
+    assert "清理陈旧索引 1 个" in message
+    assert "local-qq-user" not in message
+    assert "token" not in message.lower()
+    assert "cookie" not in message.lower()
 
 
 def test_main_window_import_all_saved_tencent_accounts_redacts_storage_errors(

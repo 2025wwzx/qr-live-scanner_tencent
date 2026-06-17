@@ -64,6 +64,7 @@ namespace。当前真实 QQ/微信协议参数仍未验证，默认只允许 `--
 qr-live-scanner-tencent tencent-login --provider qq --dry-run --qr-output work/tencent-login-qr.png
 qr-live-scanner-tencent tencent-login --provider wechat --mock-confirm --mock-uid local-wechat-user --qr-output work/tencent-login-qr.png
 qr-live-scanner-tencent tencent-list --provider wechat
+qr-live-scanner-tencent tencent-repair-index --provider wechat
 qr-live-scanner-tencent tencent-status --provider qq --uid <local-account-id>
 qr-live-scanner-tencent tencent-delete --provider qq --uid <local-account-id>
 qr-live-scanner-tencent tencent-account-smoke --provider wechat --uid local-wechat-user --cleanup
@@ -76,6 +77,8 @@ provider/UID 的 TencentSession；如果要复用测试 UID，请先运行 `tenc
 输出只包含序号、provider 和授权状态，不显示 UID、Cookie、token、ticket 或二维码 payload。
 如果索引里存在但对应 TencentSession 已缺失，列表会跳过该项并清理陈旧索引。
 如果索引内容损坏，后续列表、保存或删除会安全重建该 provider 的索引。
+`tencent-repair-index` 显式检查并修复当前 provider 的本地账号索引，只输出可用数量、
+是否重建索引和清理陈旧索引数量，不显示 UID、Cookie、token、ticket 或二维码 payload。
 `tencent-delete` 只清除本地保存的 TencentSession 和授权标记，不连接腾讯服务，
 也不会输出账号 ID、Cookie、token、ticket 或二维码 payload。
 `tencent-account-smoke` 只做本地保存、查询、账号索引验证和可选清理，不创建真实 QR 登录服务，
@@ -130,6 +133,8 @@ provider 账号加入 GUI 账号表。这个本地账号索引只保存 provider
 不保存 Cookie、token、ticket、二维码 payload 或其它凭证；早期版本已经保存但
 尚未写入索引的账号，仍可用“导入已保存账号”手动输入 UID 导入，也可以通过
 `tencent-status` 查询后回填本地账号索引。
+也可以使用“账号管理” -> “检查账号索引”显式检查当前 provider 的本地账号索引；
+GUI 状态栏只显示可用数量、是否重建索引和清理陈旧索引数量，不显示账号 ID 或凭证。
 
 也可以直接在 GUI 的“账号管理”菜单使用“本地账号自检”写入本地 mock
 TencentSession，用于验证账号表、provider 隔离和授权状态；如需复用测试 UID，

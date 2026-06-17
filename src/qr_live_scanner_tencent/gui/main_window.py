@@ -61,6 +61,7 @@ from qr_live_scanner_tencent.interfaces import (
     AccountStoreError,
     GameID,
     ROIConfig,
+    TencentAccountIndexRepairResult,
     TencentLoginProvider,
 )
 from qr_live_scanner_tencent.monitor import DEFAULT_BROWSER_PROFILE_DIR
@@ -315,6 +316,7 @@ class MainWindow(QMainWindow):
         account_menu.addAction("新增账号", self._show_add_account_dialog)
         account_menu.addAction("导入已保存账号", self._show_import_account_dialog)
         account_menu.addAction("导入全部已保存账号", self._import_saved_tencent_accounts)
+        account_menu.addAction("检查账号索引", self._repair_tencent_account_index)
         account_menu.addAction("设为默认账号", self._set_selected_account_as_default)
         account_menu.addAction("删除账号", self._clear_selected_account)
         account_menu.addAction("本地账号自检", self._run_tencent_account_smoke_dialog)
@@ -578,12 +580,15 @@ class MainWindow(QMainWindow):
     def _import_saved_tencent_accounts(self) -> None:
         provider = self._selected_provider()
         try:
-            entries = self.account_store.list_tencent_sessions(provider)
+            repair_result = self.account_store.repair_tencent_index(provider)
         except AccountStoreError:
             self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
             return
+        entries = repair_result.entries
         if not entries:
-            self.statusBar().showMessage("未找到本地已保存账号")
+            self.statusBar().showMessage(
+                _tencent_index_repair_status_message("未找到本地已保存账号", repair_result)
+            )
             return
         for entry in entries:
             if entry.provider is not provider:
@@ -591,7 +596,20 @@ class MainWindow(QMainWindow):
             self._remember_account(entry.uid, provider)
             self._set_account_table_row(entry.uid, "已保存" if entry.authorized else "未保存")
         self._save_state()
-        self.statusBar().showMessage("已导入本地已保存账号")
+        self.statusBar().showMessage(
+            _tencent_index_repair_status_message("已导入本地已保存账号", repair_result)
+        )
+
+    def _repair_tencent_account_index(self) -> None:
+        provider = self._selected_provider()
+        try:
+            repair_result = self.account_store.repair_tencent_index(provider)
+        except AccountStoreError:
+            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
+        self.statusBar().showMessage(
+            _tencent_index_repair_status_message("账号索引已检查", repair_result)
+        )
 
     def _run_tencent_account_smoke_dialog(self) -> None:
         provider = self._selected_provider()
@@ -976,6 +994,18 @@ class ROISettingsDialog(QDialog):
             return
         self.editor_group.setEnabled(True)
         self.editor_group.setVisible(True)
+
+
+def _tencent_index_repair_status_message(
+    prefix: str,
+    result: TencentAccountIndexRepairResult,
+) -> str:
+    parts = [prefix, f"可用账号 {len(result.entries)} 个"]
+    if result.rebuilt_index:
+        parts.append("已重建索引")
+    if result.removed_stale_entries > 0:
+        parts.append(f"清理陈旧索引 {result.removed_stale_entries} 个")
+    return "；".join(parts)
 
 
 class _ManualTencentAccountDialog(QDialog):

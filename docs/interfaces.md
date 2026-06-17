@@ -26,6 +26,9 @@
   `is_tencent_authorized`.
 - `AccountStore.list_tencent_sessions(provider)` returns local provider/UID
   index entries and must not include credential values.
+- `AccountStore.repair_tencent_index(provider)` repairs the local index and
+  returns provider, non-sensitive metadata entries, rebuild state, and stale
+  cleanup count; it must not expose credential values.
 - `LoginOrchestrator` is the only policy enforcer before scan/confirm.
 
 ## Security
