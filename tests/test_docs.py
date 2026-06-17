@@ -13,6 +13,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "本地账号自检" in readme
     assert "清理本地自检" in readme
     assert "本地账号自检也会做账号索引验证" in readme
+    assert "清理本地自检也会验证账号索引已清理" in readme
     assert "只会清理本地自检生成的" in readme
     assert "mock TencentSession" in readme
     assert "tencent-account-smoke" in readme

@@ -974,7 +974,69 @@ def test_main_window_local_account_smoke_cleanup_removes_mock_session(
     assert store.is_tencent_authorized("gui-smoke-cleanup", TencentLoginProvider.QQ) is False
     assert window.account_table.rowCount() == 0
     assert "本地账号自检已清理" in window.statusBar().currentMessage()
+    assert "账号索引清理验证通过" in window.statusBar().currentMessage()
     assert "local-smoke-only" not in window.statusBar().currentMessage()
+
+
+def test_main_window_local_account_smoke_cleanup_warns_when_index_still_contains_uid(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    class StickyIndexStore(FakeAccountStore):
+        def repair_tencent_index(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentAccountIndexRepairResult:
+            assert provider is TencentLoginProvider.QQ
+            return TencentAccountIndexRepairResult(
+                provider=provider,
+                entries=[
+                    TencentAccountIndexEntry(
+                        uid="gui-smoke-cleanup",
+                        provider=provider,
+                        authorized=False,
+                    )
+                ],
+            )
+
+    store = StickyIndexStore()
+    store.save_tencent_session(
+        TencentSession(
+            uid="gui-smoke-cleanup",
+            provider=TencentLoginProvider.QQ,
+            credentials={"mock_session": "local-smoke-only"},
+        ),
+        authorized=True,
+    )
+
+    class FakeTencentAccountSmokeDialog:
+        def __init__(self, **_kwargs: object) -> None:
+            self._uid = "gui-smoke-cleanup"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "TencentAccountSmokeDialog",
+        FakeTencentAccountSmokeDialog,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window._refresh_account_table_row("gui-smoke-cleanup")
+
+    window._clear_tencent_account_smoke_dialog()
+
+    assert window.account_table.rowCount() == 1
+    message = window.statusBar().currentMessage()
+    assert "本地账号清理失败：索引清理未完成" in message
+    assert "gui-smoke-cleanup" not in message
+    assert "local-smoke-only" not in message
+    assert "token" not in message.lower()
+    assert "cookie" not in message.lower()
 
 
 def test_main_window_local_account_smoke_cleanup_refuses_non_smoke_session(

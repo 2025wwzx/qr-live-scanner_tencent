@@ -666,8 +666,12 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("本地账号清理失败：只清理本地自检账号")
                 return
             self.account_store.delete_tencent_session(uid, provider)
+            repair_result = self.account_store.repair_tencent_index(provider)
         except AccountStoreError:
             self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
+        if _tencent_index_repair_result_contains(repair_result, uid, provider):
+            self.statusBar().showMessage("本地账号清理失败：索引清理未完成")
             return
         row = self._account_table_row(uid)
         if row >= 0:
@@ -677,7 +681,7 @@ class MainWindow(QMainWindow):
         self._sync_default_account_marks()
         self._sync_selected_account_label()
         self._save_state()
-        self.statusBar().showMessage("本地账号自检已清理")
+        self.statusBar().showMessage("本地账号自检已清理；账号索引清理验证通过")
 
     def _refresh_account_table_row(self, uid: str) -> None:
         provider = self._selected_provider()
