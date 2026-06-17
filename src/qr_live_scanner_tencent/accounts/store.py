@@ -196,7 +196,7 @@ class KeyringAccountStore:
                 self._tencent_authorization_username(uid, session.provider),
                 "1" if authorized else "0",
             )
-            entries = self._load_tencent_index(session.provider)
+            entries, _ = self._load_tencent_index_for_repair(session.provider)
             entries = [entry for entry in entries if entry.uid != uid]
             entries.append(
                 TencentAccountIndexEntry(
@@ -219,8 +219,9 @@ class KeyringAccountStore:
         try:
             self._delete_password(self.config.tencent_keyring_username(uid, provider))
             self._delete_password(self._tencent_authorization_username(uid, provider))
+            entries, _ = self._load_tencent_index_for_repair(provider)
             entries = [
-                entry for entry in self._load_tencent_index(provider) if entry.uid != uid
+                entry for entry in entries if entry.uid != uid
             ]
             self._save_tencent_index(provider, entries)
         except (NoKeyringError, KeyringError) as exc:
@@ -248,11 +249,11 @@ class KeyringAccountStore:
     ) -> list[TencentAccountIndexEntry]:
         provider = _provider(provider)
         try:
-            entries = self._load_tencent_index(provider)
+            entries, repaired = self._load_tencent_index_for_repair(provider)
             existing_entries = [
                 entry for entry in entries if self._tencent_session_exists(entry.uid, provider)
             ]
-            if len(existing_entries) != len(entries):
+            if repaired or len(existing_entries) != len(entries):
                 self._save_tencent_index(provider, existing_entries)
             return existing_entries
         except (NoKeyringError, KeyringError) as exc:
@@ -299,6 +300,15 @@ class KeyringAccountStore:
             [entry for entry in entries if entry.provider is provider],
             key=lambda entry: entry.uid,
         )
+
+    def _load_tencent_index_for_repair(
+        self,
+        provider: TencentLoginProvider = TencentLoginProvider.QQ,
+    ) -> tuple[list[TencentAccountIndexEntry], bool]:
+        try:
+            return self._load_tencent_index(provider), False
+        except AccountStoreError:
+            return [], True
 
     def _save_tencent_index(
         self,

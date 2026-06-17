@@ -304,6 +304,115 @@ def test_keyring_account_store_list_filters_stale_tencent_index_entries(
     assert "stale-user" not in set_calls[0][2]
 
 
+def test_keyring_account_store_list_repairs_corrupt_tencent_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_calls: list[tuple[str, str, str]] = []
+
+    def fake_get_password(service: str, username: str) -> str | None:
+        assert service == "qr-live-scanner-tencent"
+        assert username == "tencent:index:qq"
+        return "{SECRET_ACCESS_TOKEN"
+
+    def fake_set_password(service: str, username: str, password: str) -> None:
+        set_calls.append((service, username, password))
+
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.get_password",
+        fake_get_password,
+    )
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.set_password",
+        fake_set_password,
+    )
+    store = KeyringAccountStore()
+
+    assert store.list_tencent_sessions(TencentLoginProvider.QQ) == []
+    assert set_calls == [("qr-live-scanner-tencent", "tencent:index:qq", "[]")]
+    assert "SECRET_ACCESS_TOKEN" not in set_calls[0][2]
+
+
+def test_keyring_account_store_save_rebuilds_corrupt_tencent_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_get_password(service: str, username: str) -> str | None:
+        assert service == "qr-live-scanner-tencent"
+        assert username == "tencent:index:wechat"
+        return "{SECRET_ACCESS_TOKEN"
+
+    def fake_set_password(service: str, username: str, password: str) -> None:
+        calls.append((service, username, password))
+
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.get_password",
+        fake_get_password,
+    )
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.set_password",
+        fake_set_password,
+    )
+    store = KeyringAccountStore()
+
+    store.save_tencent_session(
+        TencentSession(
+            uid="wechat-user",
+            provider=TencentLoginProvider.WECHAT,
+            credentials={"access_token": "SECRET_ACCESS_TOKEN"},
+        ),
+        authorized=True,
+    )
+
+    assert calls[2][0] == "qr-live-scanner-tencent"
+    assert calls[2][1] == "tencent:index:wechat"
+    assert json.loads(calls[2][2]) == [
+        {"authorized": True, "provider": "wechat", "uid": "wechat-user"}
+    ]
+    assert "SECRET_ACCESS_TOKEN" not in calls[2][2]
+
+
+def test_keyring_account_store_delete_rebuilds_corrupt_tencent_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delete_calls: list[tuple[str, str]] = []
+    set_calls: list[tuple[str, str, str]] = []
+
+    def fake_get_password(service: str, username: str) -> str | None:
+        assert service == "qr-live-scanner-tencent"
+        assert username == "tencent:index:qq"
+        return "{SECRET_ACCESS_TOKEN"
+
+    def fake_set_password(service: str, username: str, password: str) -> None:
+        set_calls.append((service, username, password))
+
+    def fake_delete_password(service: str, username: str) -> None:
+        delete_calls.append((service, username))
+
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.get_password",
+        fake_get_password,
+    )
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.set_password",
+        fake_set_password,
+    )
+    monkeypatch.setattr(
+        "qr_live_scanner_tencent.accounts.store.keyring.delete_password",
+        fake_delete_password,
+    )
+    store = KeyringAccountStore()
+
+    store.delete_tencent_session("qq-user", TencentLoginProvider.QQ)
+
+    assert delete_calls == [
+        ("qr-live-scanner-tencent", "tencent:qq:qq-user"),
+        ("qr-live-scanner-tencent", "authorized:tencent:qq:qq-user"),
+    ]
+    assert set_calls == [("qr-live-scanner-tencent", "tencent:index:qq", "[]")]
+    assert "SECRET_ACCESS_TOKEN" not in set_calls[0][2]
+
+
 def test_keyring_account_store_deletes_tencent_session_without_touching_game_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

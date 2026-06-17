@@ -75,6 +75,7 @@ provider/UID 的 TencentSession；如果要复用测试 UID，请先运行 `tenc
 `tencent-list` 只读取本地账号索引，用于确认当前 provider 下保存了多少本地账号；
 输出只包含序号、provider 和授权状态，不显示 UID、Cookie、token、ticket 或二维码 payload。
 如果索引里存在但对应 TencentSession 已缺失，列表会跳过该项并清理陈旧索引。
+如果索引内容损坏，后续列表、保存或删除会安全重建该 provider 的索引。
 `tencent-delete` 只清除本地保存的 TencentSession 和授权标记，不连接腾讯服务，
 也不会输出账号 ID、Cookie、token、ticket 或二维码 payload。
 `tencent-account-smoke` 只做本地保存、查询和可选清理，不创建真实 QR 登录服务，
