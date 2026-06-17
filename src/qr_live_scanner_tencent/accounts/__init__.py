@@ -12,6 +12,7 @@ from qr_live_scanner_tencent.accounts.tencent_qr_login import (
     TencentAccountQRLoginState,
     TencentAccountQRLoginStatus,
     TencentAccountQRTicket,
+    load_tencent_account_qr_login_config,
 )
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "TencentAccountQRTicket",
     "TencentSession",
     "dump_tencent_session",
+    "load_tencent_account_qr_login_config",
     "load_tencent_session",
 ]

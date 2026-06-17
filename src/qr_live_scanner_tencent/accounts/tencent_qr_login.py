@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import qrcode
@@ -22,6 +24,25 @@ TENCENT_QQ_QR_QUERY_URL = "https://example.invalid/tencent/account/qq/qr/query"
 TENCENT_WECHAT_QR_FETCH_URL = "https://example.invalid/tencent/account/wechat/qr/fetch"
 TENCENT_WECHAT_QR_QUERY_URL = "https://example.invalid/tencent/account/wechat/qr/query"
 TENCENT_DRY_RUN_QR_PREFIX = "qr-live-scanner-tencent://account-login/dry-run"
+ACCOUNT_QR_LOGIN_CONFIG_SECTION = "account_qr_login"
+ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS = frozenset(
+    {"validated_protocol", "fetch_url", "query_url", "app_id"}
+)
+ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS = frozenset(
+    {
+        "account_id",
+        "cookie",
+        "credential",
+        "openid",
+        "password",
+        "payload",
+        "secret",
+        "session",
+        "ticket",
+        "token",
+        "uid",
+    }
+)
 
 
 class TencentAccountQRLoginState(StrEnum):
@@ -65,6 +86,54 @@ class TencentAccountQRLoginConfig:
             app_id=_require_text(app_id, "Tencent account QR app id is required"),
             validated_protocol=True,
         )
+
+
+def load_tencent_account_qr_login_config(
+    path: str | Path,
+    provider: TencentLoginProvider,
+) -> TencentAccountQRLoginConfig:
+    """从本地 TOML 加载已验证的腾讯账号二维码登录配置。
+
+    配置文件只能携带非敏感协议元数据。函数会拒绝疑似凭据字段、带查询串的
+    endpoint、未显式验证的配置和未知字段；错误消息不回显配置值。
+    """
+
+    config_path = Path(path)
+    try:
+        with config_path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        msg = "Tencent account QR config could not be loaded"
+        raise TencentAccountQRLoginError(msg) from exc
+    _reject_sensitive_config_keys(data)
+
+    normalized_provider = TencentLoginProvider(str(provider))
+    section = data.get(ACCOUNT_QR_LOGIN_CONFIG_SECTION)
+    if not isinstance(section, dict):
+        msg = "Tencent account QR config section is missing"
+        raise TencentAccountQRLoginError(msg)
+    provider_section = section.get(normalized_provider.value)
+    if not isinstance(provider_section, dict):
+        msg = "Tencent account QR provider config is missing"
+        raise TencentAccountQRLoginError(msg)
+
+    unknown_fields = set(provider_section) - ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS
+    if unknown_fields:
+        msg = "Tencent account QR config contains unsupported fields"
+        raise TencentAccountQRLoginError(msg)
+    if provider_section.get("validated_protocol") is not True:
+        msg = "Tencent account QR config is not validated"
+        raise TencentAccountQRLoginError(msg)
+
+    base_config = TencentAccountQRLoginService.default_configs()[normalized_provider]
+    return base_config.validated(
+        fetch_url=_require_endpoint_url(provider_section.get("fetch_url")),
+        query_url=_require_endpoint_url(provider_section.get("query_url")),
+        app_id=_require_text(
+            provider_section.get("app_id"),
+            "Tencent account QR app id is required",
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,6 +460,35 @@ def _ticket_value(ticket: str | TencentAccountQRTicket) -> str:
     if isinstance(ticket, TencentAccountQRTicket):
         return _require_text(ticket.ticket, "Tencent account QR ticket is required")
     return _require_text(ticket, "Tencent account QR ticket is required")
+
+
+def _reject_sensitive_config_keys(value: object) -> None:
+    if isinstance(value, dict):
+        for raw_key, raw_value in value.items():
+            key = str(raw_key).strip().lower()
+            if any(fragment in key for fragment in ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS):
+                msg = "Tencent account QR config contains sensitive fields"
+                raise TencentAccountQRLoginError(msg)
+            _reject_sensitive_config_keys(raw_value)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _reject_sensitive_config_keys(item)
+
+
+def _require_endpoint_url(value: object) -> str:
+    endpoint_url = _require_text(value, "Tencent account QR endpoint URL is required")
+    if "\r" in endpoint_url or "\n" in endpoint_url:
+        msg = "Tencent account QR endpoint URL is invalid"
+        raise TencentAccountQRLoginError(msg)
+    parsed = urlparse(endpoint_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        msg = "Tencent account QR endpoint URL is invalid"
+        raise TencentAccountQRLoginError(msg)
+    if parsed.query or parsed.fragment:
+        msg = "Tencent account QR endpoint URL must not include signed endpoint data"
+        raise TencentAccountQRLoginError(msg)
+    return endpoint_url
 
 
 def _require_text(value: object, message: str) -> str:

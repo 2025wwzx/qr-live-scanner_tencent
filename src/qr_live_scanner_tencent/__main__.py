@@ -22,6 +22,7 @@ from qr_live_scanner_tencent.accounts import (
     TencentAccountQRLoginStatus,
     TencentAccountQRTicket,
     TencentSession,
+    load_tencent_account_qr_login_config,
 )
 from qr_live_scanner_tencent.interfaces import (
     DEFAULT_AGGRESSIVE_ROI,
@@ -154,6 +155,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     tencent_login_parser.add_argument("--dry-run", action="store_true")
     tencent_login_parser.add_argument("--qr-output", default="work/tencent-login-qr.png")
+    tencent_login_parser.add_argument("--protocol-config")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
 
@@ -486,7 +488,10 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
             print("Tencent account login dry-run ready")
             return 0
 
-        service = _new_tencent_account_qr_login_service(provider)
+        service = _new_tencent_account_qr_login_service(
+            provider,
+            protocol_config_path=_optional_text(args.protocol_config),
+        )
         session = asyncio.run(
             _capture_tencent_session_from_qr(
                 service,
@@ -527,8 +532,13 @@ def _run_tencent_status(args: argparse.Namespace) -> int:
 
 def _new_tencent_account_qr_login_service(
     provider: TencentLoginProvider,
+    *,
+    protocol_config_path: str | Path | None = None,
 ) -> TencentAccountQRLoginService:
-    config = TencentAccountQRLoginService.default_configs()[provider]
+    if protocol_config_path is None:
+        config = TencentAccountQRLoginService.default_configs()[provider]
+    else:
+        config = load_tencent_account_qr_login_config(protocol_config_path, provider)
     return TencentAccountQRLoginService(
         client=httpx.AsyncClient(timeout=10.0),
         device_id_store=LocalDeviceIdStore.default(),

@@ -33,6 +33,31 @@ Validate these provider-account-login fields separately from game scan/confirm:
 Until those fields are verified, the account QR login service must not send real
 QQ/WeChat HTTP. Tests must use `httpx.MockTransport` or injected GUI services.
 
+## Local Protocol Config
+
+After a provider account-login protocol is verified, non-sensitive metadata may
+be loaded from a local TOML file:
+
+```toml
+[account_qr_login.qq]
+validated_protocol = true
+fetch_url = "https://example.test/qq/fetch"
+query_url = "https://example.test/qq/query"
+app_id = "verified-app-id"
+```
+
+Use it only with clean endpoint URLs:
+
+```powershell
+qr-live-scanner-tencent tencent-login `
+  --provider qq `
+  --protocol-config profiles/tencent-account-login.toml
+```
+
+The config loader rejects sensitive field names and endpoint URLs with query
+strings or fragments. Do not place Cookie, token, ticket, openid, uid, QR
+payload, credentials, session data, or signed URLs in this file.
+
 ## Required Validation
 
 Record these fields before enabling real confirm:

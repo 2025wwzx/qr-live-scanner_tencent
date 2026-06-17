@@ -9,6 +9,7 @@ from qr_live_scanner_tencent.accounts.tencent_qr_login import (
     TencentAccountQRLoginError,
     TencentAccountQRLoginService,
     TencentAccountQRLoginState,
+    load_tencent_account_qr_login_config,
 )
 from qr_live_scanner_tencent.interfaces import TencentLoginProvider
 
@@ -19,6 +20,79 @@ def test_tencent_account_qr_login_default_configs_are_gated() -> None:
     assert set(configs) == {TencentLoginProvider.QQ, TencentLoginProvider.WECHAT}
     assert configs[TencentLoginProvider.QQ].validated_protocol is False
     assert configs[TencentLoginProvider.WECHAT].validated_protocol is False
+
+
+def test_load_tencent_account_qr_login_config_validates_provider_section(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'fetch_url = "https://example.test/qq/fetch"',
+                'query_url = "https://example.test/qq/query"',
+                'app_id = "test-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
+
+    assert config.provider is TencentLoginProvider.QQ
+    assert config.validated_protocol is True
+    assert config.fetch_url == "https://example.test/qq/fetch"
+    assert config.query_url == "https://example.test/qq/query"
+    assert config.app_id == "test-app"
+
+
+def test_load_tencent_account_qr_login_config_rejects_sensitive_fields_without_echo(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'fetch_url = "https://example.test/qq/fetch"',
+                'query_url = "https://example.test/qq/query"',
+                'app_id = "test-app"',
+                'access_token = "SECRET_ACCESS_TOKEN"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TencentAccountQRLoginError, match="sensitive") as exc_info:
+        load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
+
+    assert "SECRET_ACCESS_TOKEN" not in str(exc_info.value)
+
+
+def test_load_tencent_account_qr_login_config_rejects_signed_urls_without_echo(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'fetch_url = "https://example.test/qq/fetch?ticket=SECRET_TICKET"',
+                'query_url = "https://example.test/qq/query"',
+                'app_id = "test-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TencentAccountQRLoginError, match="endpoint") as exc_info:
+        load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
+
+    assert "SECRET_TICKET" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio

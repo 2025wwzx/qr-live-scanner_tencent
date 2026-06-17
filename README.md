@@ -49,6 +49,22 @@ qr-live-scanner-tencent tencent-login --provider qq --dry-run --qr-output work/t
 qr-live-scanner-tencent tencent-status --provider qq --uid <local-account-id>
 ```
 
+后续如果已经验证出 QQ/微信账号二维码登录协议参数，可以只把非敏感元数据放在本地
+TOML 中，再通过 `--protocol-config` 启用。不要把 Cookie、token、ticket、openid、
+UID、二维码 payload 或任何已签名 URL 写进配置文件。
+
+```toml
+[account_qr_login.qq]
+validated_protocol = true
+fetch_url = "https://example.test/qq/fetch"
+query_url = "https://example.test/qq/query"
+app_id = "your-app-id"
+```
+
+```powershell
+qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml
+```
+
 ## License
 
 CC BY-NC 4.0。禁止任何形式的商业用途或贩卖。
