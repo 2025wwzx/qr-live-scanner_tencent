@@ -92,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_login(args)
     if args.command == "tencent-status":
         return _run_tencent_status(args)
+    if args.command == "tencent-delete":
+        return _run_tencent_delete(args)
     parser.print_help()
     return 0
 
@@ -191,6 +193,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=TencentLoginProvider.QQ.value,
     )
     tencent_status_parser.add_argument("--uid", required=True)
+
+    tencent_delete_parser = subparsers.add_parser("tencent-delete")
+    tencent_delete_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+    tencent_delete_parser.add_argument("--uid", required=True)
 
     redact_parser = subparsers.add_parser("redact-har")
     redact_parser.add_argument("--input", required=True)
@@ -705,6 +715,21 @@ def _run_tencent_status(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent account status failed: {exc}")
         return 2
     print("Tencent account session status: saved and authorized")
+    return 0
+
+
+def _run_tencent_delete(args: argparse.Namespace) -> int:
+    try:
+        provider = TencentLoginProvider(str(args.provider))
+        uid = _required_text(args.uid, "uid")
+        KeyringAccountStore().delete_tencent_session(uid, provider)
+    except AccountStoreError:
+        print("[WARN] Tencent account delete failed: credential storage unavailable")
+        return 2
+    except ValueError as exc:
+        print(f"[WARN] Tencent account delete failed: {exc}")
+        return 2
+    print("Tencent account session deleted")
     return 0
 
 

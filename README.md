@@ -64,10 +64,13 @@ namespace。当前真实 QQ/微信协议参数仍未验证，默认只允许 `--
 qr-live-scanner-tencent tencent-login --provider qq --dry-run --qr-output work/tencent-login-qr.png
 qr-live-scanner-tencent tencent-login --provider wechat --mock-confirm --mock-uid local-wechat-user --qr-output work/tencent-login-qr.png
 qr-live-scanner-tencent tencent-status --provider qq --uid <local-account-id>
+qr-live-scanner-tencent tencent-delete --provider qq --uid <local-account-id>
 ```
 
 `--mock-confirm` 只保存本地 mock session，用于验证 keyring、GUI 账号表和
 自动确认 gate；它不代表 QQ/微信真实扫码协议已验证。
+`tencent-delete` 只清除本地保存的 TencentSession 和授权标记，不连接腾讯服务，
+也不会输出账号 ID、Cookie、token、ticket 或二维码 payload。
 
 ### GUI 本地 mock 账号测试
 

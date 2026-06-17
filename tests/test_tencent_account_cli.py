@@ -501,6 +501,60 @@ def test_tencent_status_cli_redacts_storage_errors(
     assert "10001" not in output
 
 
+def test_tencent_delete_cli_removes_saved_session_without_echoing_identifiers(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    deleted: list[tuple[str, TencentLoginProvider]] = []
+
+    class FakeStore:
+        def delete_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> None:
+            deleted.append((uid, provider))
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-delete", "--provider", "wechat", "--uid", "local-wechat-user"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert deleted == [("local-wechat-user", TencentLoginProvider.WECHAT)]
+    assert "Tencent account session deleted" in output
+    assert "local-wechat-user" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_delete_cli_redacts_storage_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def delete_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> None:
+            assert uid == "10001"
+            assert provider is TencentLoginProvider.QQ
+            raise AccountStoreError("SECRET_ACCESS_TOKEN should not be visible")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-delete", "--provider", "qq", "--uid", "10001"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "credential storage unavailable" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "10001" not in output
+
+
 async def test_tencent_login_cli_closes_service_when_qr_fetch_fails(tmp_path: Path) -> None:
     closed: list[bool] = []
 
