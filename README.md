@@ -56,13 +56,18 @@ payload, or header values.
 
 已新增独立账号登录链路：`tencent-login` 会由本项目生成 QQ/微信账号登录二维码，
 确认成功后将 `TencentSession` 保存到本地 keyring 的 `qr-live-scanner-tencent`
-namespace。当前真实 QQ/微信协议参数仍未验证，默认只允许 `--dry-run` 或测试 mock；
+namespace。当前真实 QQ/微信协议参数仍未验证，默认只允许 `--dry-run`、本地
+`--mock-confirm` 或测试 mock；
 未验证配置不会发真实 HTTP，也不会输出 Cookie、token、账号 ID、ticket 或 QR payload。
 
 ```powershell
 qr-live-scanner-tencent tencent-login --provider qq --dry-run --qr-output work/tencent-login-qr.png
+qr-live-scanner-tencent tencent-login --provider wechat --mock-confirm --mock-uid local-wechat-user --qr-output work/tencent-login-qr.png
 qr-live-scanner-tencent tencent-status --provider qq --uid <local-account-id>
 ```
+
+`--mock-confirm` 只保存本地 mock session，用于验证 keyring、GUI 账号表和
+自动确认 gate；它不代表 QQ/微信真实扫码协议已验证。
 
 后续如果已经验证出 QQ/微信账号二维码登录协议参数，可以只把非敏感元数据放在本地
 TOML 中，再通过 `--protocol-config` 启用。不要把 Cookie、token、ticket、openid、

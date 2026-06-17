@@ -42,6 +42,96 @@ def test_tencent_login_cli_dry_run_writes_demo_qr_without_echoing_secrets(
     assert "payload" not in output.lower()
 
 
+def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "wechat-login.png"
+    saved: list[tuple[TencentSession, bool]] = []
+
+    class FakeStore:
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            saved.append((session, authorized))
+
+    def fail_if_real_service_is_created(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("mock confirm must not create the real QR login service")
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+    monkeypatch.setattr(
+        main_module,
+        "_new_tencent_account_qr_login_service",
+        fail_if_real_service_is_created,
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-login",
+            "--provider",
+            "wechat",
+            "--mock-confirm",
+            "--mock-uid",
+            "local-wechat-user",
+            "--qr-output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert output_path.exists()
+    assert output_path.read_bytes().startswith(b"\x89PNG")
+    assert len(saved) == 1
+    session, authorized = saved[0]
+    assert session.uid == "local-wechat-user"
+    assert session.provider is TencentLoginProvider.WECHAT
+    assert session.credentials == {"mock_session": "local-mock-only"}
+    assert authorized is True
+    assert "mock Tencent account session saved" in output
+    assert "local-wechat-user" not in output
+    assert "local-mock-only" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
+
+
+def test_tencent_login_cli_mock_confirm_requires_mock_uid_before_writing_qr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "mock-login.png"
+
+    def fail_if_real_service_is_created(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("mock confirm must validate before creating services")
+
+    monkeypatch.setattr(
+        main_module,
+        "_new_tencent_account_qr_login_service",
+        fail_if_real_service_is_created,
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-login",
+            "--provider",
+            "qq",
+            "--mock-confirm",
+            "--qr-output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert not output_path.exists()
+    assert "mock uid is required" in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+
+
 @pytest.mark.parametrize(
     ("option", "value", "message"),
     [
@@ -436,3 +526,12 @@ async def test_tencent_login_cli_closes_service_when_qr_fetch_fails(tmp_path: Pa
         )
 
     assert closed == [True]
+
+
+def _run_main(argv: list[str]) -> int:
+    try:
+        return main(argv)
+    except SystemExit as exc:
+        if isinstance(exc.code, int):
+            return exc.code
+        return 1

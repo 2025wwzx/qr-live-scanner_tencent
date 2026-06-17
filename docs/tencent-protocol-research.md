@@ -32,6 +32,9 @@ Validate these provider-account-login fields separately from game scan/confirm:
 
 Until those fields are verified, the account QR login service must not send real
 QQ/WeChat HTTP. Tests must use `httpx.MockTransport` or injected GUI services.
+For local end-to-end storage and GUI gate checks, use `tencent-login
+--mock-confirm --mock-uid <local-id>`; this writes a dry-run QR image and stores
+a local mock `TencentSession` only.
 
 ## Local Protocol Config
 

@@ -166,6 +166,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=TencentLoginProvider.QQ.value,
     )
     tencent_login_parser.add_argument("--dry-run", action="store_true")
+    tencent_login_parser.add_argument("--mock-confirm", action="store_true")
+    tencent_login_parser.add_argument("--mock-uid")
     tencent_login_parser.add_argument("--qr-output", default="work/tencent-login-qr.png")
     tencent_login_parser.add_argument("--protocol-config")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
@@ -373,7 +375,7 @@ def _optional_roi(value: object, *, default: ROIConfig | None = None) -> ROIConf
 
 
 def _required_text(value: object, label: str) -> str:
-    text = str(value).strip()
+    text = "" if value is None else str(value).strip()
     if not text:
         msg = f"{label} is required"
         raise ValueError(msg)
@@ -581,6 +583,14 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
         poll_interval_seconds = _validate_tencent_login_poll_interval(
             float(args.poll_interval_seconds)
         )
+        if bool(args.mock_confirm):
+            _run_tencent_login_mock_confirm(
+                provider=provider,
+                qr_output_path=qr_output_path,
+                mock_uid=_required_text(args.mock_uid, "mock uid is required"),
+            )
+            return 0
+
         if bool(args.dry_run):
             service = TencentAccountQRLoginService.dry_run(
                 provider=provider,
@@ -616,6 +626,34 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
         return 2
     print("Tencent account session saved")
     return 0
+
+
+def _run_tencent_login_mock_confirm(
+    *,
+    provider: TencentLoginProvider,
+    qr_output_path: Path,
+    mock_uid: str,
+) -> None:
+    service = TencentAccountQRLoginService.dry_run(
+        provider=provider,
+        device_id_store=LocalDeviceIdStore.default(),
+    )
+    try:
+        ticket = service.dry_run_ticket()
+        service.write_qr_png(ticket, qr_output_path)
+    finally:
+        asyncio.run(service.aclose())
+
+    KeyringAccountStore().save_tencent_session(
+        TencentSession(
+            uid=mock_uid,
+            provider=provider,
+            credentials={"mock_session": "local-mock-only"},
+        ),
+        authorized=True,
+    )
+    print(f"Tencent account QR mock image written: {qr_output_path}")
+    print("mock Tencent account session saved")
 
 
 def _run_tencent_status(args: argparse.Namespace) -> int:
