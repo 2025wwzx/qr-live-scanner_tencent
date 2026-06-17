@@ -36,13 +36,16 @@ def test_gui_snapshot_cli_writes_visual_pngs(
 
     main_window = output_dir / "main-window.png"
     account_dialog = output_dir / "tencent-account-dialog-wechat.png"
+    import_dialog = output_dir / "tencent-account-import-dialog-wechat.png"
     smoke_dialog = output_dir / "tencent-account-smoke-dialog-wechat.png"
     assert exit_code == 0
     assert main_window.read_bytes().startswith(b"\x89PNG")
     assert account_dialog.read_bytes().startswith(b"\x89PNG")
+    assert import_dialog.read_bytes().startswith(b"\x89PNG")
     assert smoke_dialog.read_bytes().startswith(b"\x89PNG")
     assert str(main_window) in output
     assert str(account_dialog) in output
+    assert str(import_dialog) in output
     assert str(smoke_dialog) in output
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()
@@ -85,6 +88,9 @@ def test_gui_snapshot_cli_can_render_mock_account_state(
     assert exit_code == 0
     assert (output_dir / "main-window.png").read_bytes().startswith(b"\x89PNG")
     assert (output_dir / "tencent-account-dialog-wechat.png").read_bytes().startswith(b"\x89PNG")
+    assert (output_dir / "tencent-account-import-dialog-wechat.png").read_bytes().startswith(
+        b"\x89PNG"
+    )
     assert (output_dir / "tencent-account-smoke-dialog-wechat.png").read_bytes().startswith(
         b"\x89PNG"
     )
