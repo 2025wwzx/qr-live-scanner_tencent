@@ -86,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_protocol_config_skeleton(args)
     if args.command == "gui":
         return _run_gui(args)
+    if args.command == "gui-snapshot":
+        return _run_gui_snapshot(args)
     if args.command == "tencent-login":
         return _run_tencent_login(args)
     if args.command == "tencent-status":
@@ -158,6 +160,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     gui_parser = subparsers.add_parser("gui")
     gui_parser.add_argument("--dry-run", action="store_true")
+
+    gui_snapshot_parser = subparsers.add_parser("gui-snapshot")
+    gui_snapshot_parser.add_argument("--output-dir", default="work/gui-snapshots")
+    gui_snapshot_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
 
     tencent_login_parser = subparsers.add_parser("tencent-login")
     tencent_login_parser.add_argument(
@@ -573,6 +583,22 @@ def _run_gui(args: argparse.Namespace) -> int:
     window = MainWindow(state_path=DEFAULT_GUI_STATE_PATH)
     window.show()
     return int(app.exec())
+
+
+def _run_gui_snapshot(args: argparse.Namespace) -> int:
+    from qr_live_scanner_tencent.gui.snapshot import write_gui_snapshots
+
+    try:
+        paths = write_gui_snapshots(
+            Path(str(args.output_dir)),
+            provider=TencentLoginProvider(str(args.provider)),
+        )
+    except RuntimeError as exc:
+        print(f"[WARN] {exc}")
+        return 2
+    for path in paths:
+        print(f"GUI snapshot written: {path}")
+    return 0
 
 
 def _run_tencent_login(args: argparse.Namespace) -> int:

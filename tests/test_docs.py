@@ -11,3 +11,5 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "Mock confirm" in readme
     assert "Local mock UID" in readme
     assert "QQ/微信真实 HTTP 仍然禁用" in readme
+    assert "qr-live-scanner-tencent gui-snapshot" in readme
+    assert "work/gui-snapshots" in readme

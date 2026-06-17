@@ -86,6 +86,15 @@ qr-live-scanner-tencent gui --dry-run
 4. 点击 `Mock confirm`。
 5. 回到主窗口后确认账号表出现该 UID，登录态显示为已保存。
 
+如果只想先查看主窗口和账号弹窗外观，可以生成本地 PNG 快照：
+
+```powershell
+qr-live-scanner-tencent gui-snapshot --provider wechat --output-dir work/gui-snapshots
+```
+
+该命令会写入 `work/gui-snapshots`，只做离屏渲染，不连接直播平台、不访问
+keyring，也不发送 QQ/微信真实 HTTP。
+
 后续如果已经验证出 QQ/微信账号二维码登录协议参数，可以只把非敏感元数据放在本地
 TOML 中，再通过 `--protocol-config` 启用。不要把 Cookie、token、ticket、openid、
 UID、二维码 payload 或任何已签名 URL 写进配置文件。

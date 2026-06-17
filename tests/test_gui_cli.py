@@ -1,3 +1,6 @@
+from pathlib import Path
+from typing import cast
+
 import pytest
 
 from qr_live_scanner_tencent.__main__ import main
@@ -12,3 +15,46 @@ def test_gui_cli_dry_run_reports_entrypoint(capsys: pytest.CaptureFixture[str]) 
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()
     assert "payload" not in output.lower()
+
+
+def test_gui_snapshot_cli_writes_visual_pngs(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "gui-snapshots"
+
+    exit_code = main(
+        [
+            "gui-snapshot",
+            "--provider",
+            "wechat",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    main_window = output_dir / "main-window.png"
+    account_dialog = output_dir / "tencent-account-dialog-wechat.png"
+    assert exit_code == 0
+    assert main_window.read_bytes().startswith(b"\x89PNG")
+    assert account_dialog.read_bytes().startswith(b"\x89PNG")
+    assert str(main_window) in output
+    assert str(account_dialog) in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "payload" not in output.lower()
+
+    from PySide6.QtWidgets import QApplication
+
+    app_instance = QApplication.instance()
+    assert app_instance is not None
+    app = cast(QApplication, app_instance)
+    assert app.font().family() in {
+        "Noto Sans SC",
+        "Microsoft YaHei",
+        "Microsoft YaHei UI",
+        "SimHei",
+        "SimSun",
+        "NSimSun",
+    }
