@@ -81,6 +81,60 @@ def test_redact_har_removes_sensitive_url_path_segments() -> None:
     assert "safe=keep" in encoded
 
 
+def test_redact_har_keeps_wechat_oauth_endpoint_name_but_redacts_query_values() -> None:
+    secret = "SECRET_WECHAT_CODE"
+    har = {
+        "log": {
+            "entries": [
+                {
+                    "request": {
+                        "url": (
+                            "https://api.weixin.qq.com/sns/oauth2/access_token"
+                            f"?appid=wx-test&code={secret}&safe=keep"
+                        ),
+                        "headers": [],
+                    },
+                    "response": {"status": 200},
+                }
+            ]
+        }
+    }
+
+    encoded = json.dumps(redact_har(har), ensure_ascii=False)
+
+    assert "sns/oauth2/access_token" in encoded
+    assert secret not in encoded
+    assert "code=%5BREDACTED%5D" in encoded
+    assert "safe=keep" in encoded
+
+
+def test_redact_har_keeps_qq_oauth_token_endpoint_name_but_redacts_code() -> None:
+    secret = "SECRET_QQ_CODE"
+    har = {
+        "log": {
+            "entries": [
+                {
+                    "request": {
+                        "url": (
+                            "https://graph.qq.com/oauth2.0/token"
+                            f"?client_id=qq-app&code={secret}&safe=keep"
+                        ),
+                        "headers": [],
+                    },
+                    "response": {"status": 200},
+                }
+            ]
+        }
+    }
+
+    encoded = json.dumps(redact_har(har), ensure_ascii=False)
+
+    assert "oauth2.0/token" in encoded
+    assert secret not in encoded
+    assert "code=%5BREDACTED%5D" in encoded
+    assert "safe=keep" in encoded
+
+
 def test_redact_har_cli_writes_sanitized_copy_without_echoing_secrets(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

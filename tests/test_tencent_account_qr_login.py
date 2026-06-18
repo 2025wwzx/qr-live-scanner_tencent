@@ -73,6 +73,56 @@ def test_load_tencent_account_qr_login_config_accepts_qq_ptlogin_mode(
     assert config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN
 
 
+def test_load_tencent_account_qr_login_config_accepts_qq_qrconnect_mode(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/qq/callback"',
+                'app_id = "qq-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
+
+    assert config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT
+    assert config.redirect_uri == "https://login.example.test/qq/callback"
+
+
+def test_load_tencent_account_qr_login_config_accepts_wechat_qrconnect_mode(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = true",
+                'protocol_mode = "wechat_qrconnect"',
+                'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
+                'redirect_uri = "https://login.example.test/wechat/callback"',
+                'app_id = "wechat-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_tencent_account_qr_login_config(config_path, TencentLoginProvider.WECHAT)
+
+    assert config.protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT
+    assert config.redirect_uri == "https://login.example.test/wechat/callback"
+
+
 def test_load_tencent_account_qr_login_config_rejects_sensitive_fields_without_echo(
     tmp_path: Path,
 ) -> None:
@@ -375,6 +425,391 @@ async def test_tencent_account_qr_login_qq_ptlogin_query_builds_cookie_session()
     assert requests[0].url.params["aid"] == "test-app"
     assert requests[0].url.params["ptqrtoken"] == _qq_hash33("SECRET_QRSIG")
     assert "SECRET_SKEY" not in status.safe_description()
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_qq_qrconnect_builds_authorize_qr_url() -> None:
+    called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(500)
+
+    config = TencentAccountQRLoginService.default_configs()[TencentLoginProvider.QQ].validated(
+        fetch_url="https://graph.qq.com/oauth2.0/authorize",
+        query_url="https://graph.qq.com/oauth2.0/token",
+        redirect_uri="https://login.example.test/qq/callback",
+        app_id="qq-app",
+        protocol_mode=TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+    )
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=config,
+    )
+
+    ticket = await service.fetch_qr()
+
+    assert called is False
+    assert ticket.provider is TencentLoginProvider.QQ
+    assert ticket.ticket
+    assert ticket.qr_url.startswith("https://graph.qq.com/oauth2.0/authorize?")
+    assert "client_id=qq-app" in ticket.qr_url
+    assert "response_type=code" in ticket.qr_url
+    assert "scope=get_user_info" in ticket.qr_url
+    assert "state=" in ticket.qr_url
+    assert "SECRET" not in ticket.safe_description()
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_qq_qrconnect_waits_for_callback_code() -> None:
+    called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(500)
+
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[TencentLoginProvider.QQ].validated(
+            fetch_url="https://graph.qq.com/oauth2.0/authorize",
+            query_url="https://graph.qq.com/oauth2.0/token",
+            redirect_uri="https://login.example.test/qq/callback",
+            app_id="qq-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+        ),
+    )
+    ticket = await service.fetch_qr()
+
+    status = await service.query_qr(ticket)
+
+    assert status.state is TencentAccountQRLoginState.WAITING
+    assert status.session is None
+    assert called is False
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_qq_qrconnect_exchanges_callback_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "SECRET_QQ_ACCESS_TOKEN",
+                "expires_in": 7776000,
+                "refresh_token": "SECRET_QQ_REFRESH_TOKEN",
+                "openid": "SECRET_QQ_OPENID",
+                "scope": "get_user_info",
+            },
+        )
+
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", "SECRET_QQ_APP_SECRET")
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[TencentLoginProvider.QQ].validated(
+            fetch_url="https://graph.qq.com/oauth2.0/authorize",
+            query_url="https://graph.qq.com/oauth2.0/token",
+            redirect_uri="https://login.example.test/qq/callback",
+            app_id="qq-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+        ),
+    )
+    ticket = await service.fetch_qr()
+    service.accept_oauth_callback(state=ticket.ticket, code="SECRET_QQ_CODE")
+
+    status = await service.query_qr(ticket)
+
+    assert status.state is TencentAccountQRLoginState.CONFIRMED
+    assert status.session is not None
+    assert status.session.uid == "SECRET_QQ_OPENID"
+    assert status.session.provider is TencentLoginProvider.QQ
+    assert status.session.credentials["access_token"] == "SECRET_QQ_ACCESS_TOKEN"
+    assert status.session.credentials["openid"] == "SECRET_QQ_OPENID"
+    assert requests[0].method == "GET"
+    assert requests[0].url.params["client_id"] == "qq-app"
+    assert requests[0].url.params["client_secret"] == "SECRET_QQ_APP_SECRET"
+    assert requests[0].url.params["code"] == "SECRET_QQ_CODE"
+    assert requests[0].url.params["grant_type"] == "authorization_code"
+    assert requests[0].url.params["need_openid"] == "1"
+    assert "SECRET_QQ_ACCESS_TOKEN" not in status.safe_description()
+    assert "SECRET_QQ_OPENID" not in status.safe_description()
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_qq_qrconnect_fetches_openid_when_needed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if str(request.url).startswith("https://graph.qq.com/oauth2.0/me"):
+            return httpx.Response(
+                200,
+                text='callback( {"client_id":"qq-app","openid":"SECRET_QQ_OPENID"} );',
+            )
+        return httpx.Response(
+            200,
+            text="access_token=SECRET_QQ_ACCESS_TOKEN&expires_in=7776000&refresh_token=SECRET_QQ_REFRESH_TOKEN",
+        )
+
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", "SECRET_QQ_APP_SECRET")
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[TencentLoginProvider.QQ].validated(
+            fetch_url="https://graph.qq.com/oauth2.0/authorize",
+            query_url="https://graph.qq.com/oauth2.0/token",
+            redirect_uri="https://login.example.test/qq/callback",
+            app_id="qq-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+        ),
+    )
+    ticket = await service.fetch_qr()
+    service.accept_oauth_callback(state=ticket.ticket, code="SECRET_QQ_CODE")
+
+    status = await service.query_qr(ticket)
+
+    assert status.state is TencentAccountQRLoginState.CONFIRMED
+    assert status.session is not None
+    assert status.session.uid == "SECRET_QQ_OPENID"
+    assert len(requests) == 2
+    assert requests[1].url.params["access_token"] == "SECRET_QQ_ACCESS_TOKEN"
+    assert "SECRET_QQ_ACCESS_TOKEN" not in status.safe_description()
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_qq_qrconnect_local_callback_completes_login(
+    monkeypatch: pytest.MonkeyPatch,
+    unused_tcp_port: int,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "SECRET_QQ_ACCESS_TOKEN",
+                "openid": "SECRET_QQ_OPENID",
+            },
+        )
+
+    redirect_uri = f"http://127.0.0.1:{unused_tcp_port}/qq/callback"
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", "SECRET_QQ_APP_SECRET")
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[TencentLoginProvider.QQ].validated(
+            fetch_url="https://graph.qq.com/oauth2.0/authorize",
+            query_url="https://graph.qq.com/oauth2.0/token",
+            redirect_uri=redirect_uri,
+            app_id="qq-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+        ),
+    )
+
+    ticket = await service.fetch_qr()
+    async with httpx.AsyncClient(trust_env=False) as browser:
+        callback_response = await browser.get(
+            f"{redirect_uri}?code=SECRET_QQ_CODE&state={ticket.ticket}"
+        )
+    status = await service.query_qr(ticket)
+
+    assert callback_response.status_code == 200
+    assert status.state is TencentAccountQRLoginState.CONFIRMED
+    assert status.session is not None
+    assert status.session.uid == "SECRET_QQ_OPENID"
+    assert requests[0].url.params["code"] == "SECRET_QQ_CODE"
+    assert "SECRET_QQ_CODE" not in callback_response.text
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_wechat_qrconnect_builds_authorize_qr_url() -> None:
+    called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(500)
+
+    config = TencentAccountQRLoginService.default_configs()[
+        TencentLoginProvider.WECHAT
+    ].validated(
+        fetch_url="https://open.weixin.qq.com/connect/qrconnect",
+        query_url="https://api.weixin.qq.com/sns/oauth2/access_token",
+        redirect_uri="https://login.example.test/wechat/callback",
+        app_id="wechat-app",
+        protocol_mode=TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+    )
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=config,
+    )
+
+    ticket = await service.fetch_qr()
+
+    assert called is False
+    assert ticket.provider is TencentLoginProvider.WECHAT
+    assert ticket.ticket
+    assert ticket.qr_url.startswith("https://open.weixin.qq.com/connect/qrconnect?")
+    assert ticket.qr_url.endswith("#wechat_redirect")
+    assert "appid=wechat-app" in ticket.qr_url
+    assert "response_type=code" in ticket.qr_url
+    assert "scope=snsapi_login" in ticket.qr_url
+    assert "state=" in ticket.qr_url
+    assert "SECRET" not in ticket.safe_description()
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_wechat_qrconnect_waits_for_callback_code() -> None:
+    called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(500)
+
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[
+            TencentLoginProvider.WECHAT
+        ].validated(
+            fetch_url="https://open.weixin.qq.com/connect/qrconnect",
+            query_url="https://api.weixin.qq.com/sns/oauth2/access_token",
+            redirect_uri="https://login.example.test/wechat/callback",
+            app_id="wechat-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+        ),
+    )
+    ticket = await service.fetch_qr()
+
+    status = await service.query_qr(ticket)
+
+    assert status.state is TencentAccountQRLoginState.WAITING
+    assert status.session is None
+    assert called is False
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_wechat_qrconnect_exchanges_callback_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "SECRET_WECHAT_ACCESS_TOKEN",
+                "expires_in": 7200,
+                "refresh_token": "SECRET_WECHAT_REFRESH_TOKEN",
+                "openid": "SECRET_WECHAT_OPENID",
+                "scope": "snsapi_login",
+                "unionid": "SECRET_WECHAT_UNIONID",
+            },
+        )
+
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET", "SECRET_APP_SECRET")
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[
+            TencentLoginProvider.WECHAT
+        ].validated(
+            fetch_url="https://open.weixin.qq.com/connect/qrconnect",
+            query_url="https://api.weixin.qq.com/sns/oauth2/access_token",
+            redirect_uri="https://login.example.test/wechat/callback",
+            app_id="wechat-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+        ),
+    )
+    ticket = await service.fetch_qr()
+    service.accept_oauth_callback(state=ticket.ticket, code="SECRET_WECHAT_CODE")
+
+    status = await service.query_qr(ticket)
+
+    assert status.state is TencentAccountQRLoginState.CONFIRMED
+    assert status.session is not None
+    assert status.session.uid == "SECRET_WECHAT_UNIONID"
+    assert status.session.provider is TencentLoginProvider.WECHAT
+    assert status.session.credentials["access_token"] == "SECRET_WECHAT_ACCESS_TOKEN"
+    assert status.session.credentials["openid"] == "SECRET_WECHAT_OPENID"
+    assert requests[0].method == "GET"
+    assert requests[0].url.params["appid"] == "wechat-app"
+    assert requests[0].url.params["secret"] == "SECRET_APP_SECRET"
+    assert requests[0].url.params["code"] == "SECRET_WECHAT_CODE"
+    assert requests[0].url.params["grant_type"] == "authorization_code"
+    assert "SECRET_WECHAT_ACCESS_TOKEN" not in status.safe_description()
+    assert "SECRET_WECHAT_UNIONID" not in status.safe_description()
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_wechat_qrconnect_local_callback_completes_login(
+    monkeypatch: pytest.MonkeyPatch,
+    unused_tcp_port: int,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "SECRET_WECHAT_ACCESS_TOKEN",
+                "openid": "SECRET_WECHAT_OPENID",
+            },
+        )
+
+    redirect_uri = f"http://127.0.0.1:{unused_tcp_port}/wechat/callback"
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET", "SECRET_APP_SECRET")
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[
+            TencentLoginProvider.WECHAT
+        ].validated(
+            fetch_url="https://open.weixin.qq.com/connect/qrconnect",
+            query_url="https://api.weixin.qq.com/sns/oauth2/access_token",
+            redirect_uri=redirect_uri,
+            app_id="wechat-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+        ),
+    )
+
+    ticket = await service.fetch_qr()
+    async with httpx.AsyncClient(trust_env=False) as browser:
+        callback_response = await browser.get(
+            f"{redirect_uri}?code=SECRET_WECHAT_CODE&state={ticket.ticket}"
+        )
+    status = await service.query_qr(ticket)
+
+    assert callback_response.status_code == 200
+    assert status.state is TencentAccountQRLoginState.CONFIRMED
+    assert status.session is not None
+    assert status.session.uid == "SECRET_WECHAT_OPENID"
+    assert requests[0].url.params["code"] == "SECRET_WECHAT_CODE"
+    assert "SECRET_WECHAT_CODE" not in callback_response.text
     await service.aclose()
 
 

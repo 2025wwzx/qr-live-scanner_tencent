@@ -642,6 +642,100 @@ def test_account_qr_config_skeleton_cli_writes_safe_toml(
     assert "cookie" not in skeleton.lower()
 
 
+def test_account_qr_config_skeleton_infers_qq_qrconnect_mode() -> None:
+    sample = {
+        "source": "redacted-har",
+        "provider": "qq",
+        "flow": "account-login",
+        "entries": [
+            {
+                "index": 0,
+                "method": "GET",
+                "scheme": "https",
+                "host": "graph.qq.com",
+                "path": "/oauth2.0/authorize",
+                "query_keys": ["client_id", "redirect_uri", "response_type", "state"],
+                "request_header_names": ["user-agent"],
+                "request_body_mime_type": "",
+                "has_request_body": False,
+                "response_status": 302,
+                "response_header_names": [],
+                "response_body_mime_type": "text/html",
+            },
+            {
+                "index": 1,
+                "method": "GET",
+                "scheme": "https",
+                "host": "graph.qq.com",
+                "path": "/oauth2.0/token",
+                "query_keys": ["client_id", "code", "grant_type"],
+                "request_header_names": ["user-agent"],
+                "request_body_mime_type": "",
+                "has_request_body": False,
+                "response_status": 200,
+                "response_header_names": [],
+                "response_body_mime_type": "application/json",
+            },
+        ],
+    }
+
+    skeleton = protocol_sample.render_tencent_account_qr_config_skeleton(sample)
+
+    assert 'protocol_mode = "qq_qrconnect"' in skeleton
+    assert 'fetch_url = "https://graph.qq.com/oauth2.0/authorize"' in skeleton
+    assert 'query_url = "https://graph.qq.com/oauth2.0/token"' in skeleton
+    assert 'redirect_uri = "http://127.0.0.1:8765/qq/callback"' in skeleton
+    assert "?" not in skeleton
+    assert "code=" not in skeleton
+
+
+def test_account_qr_config_skeleton_infers_wechat_qrconnect_mode() -> None:
+    sample = {
+        "source": "redacted-har",
+        "provider": "wechat",
+        "flow": "account-login",
+        "entries": [
+            {
+                "index": 0,
+                "method": "GET",
+                "scheme": "https",
+                "host": "open.weixin.qq.com",
+                "path": "/connect/qrconnect",
+                "query_keys": ["appid", "redirect_uri", "response_type", "state"],
+                "request_header_names": ["user-agent"],
+                "request_body_mime_type": "",
+                "has_request_body": False,
+                "response_status": 302,
+                "response_header_names": [],
+                "response_body_mime_type": "text/html",
+            },
+            {
+                "index": 1,
+                "method": "GET",
+                "scheme": "https",
+                "host": "api.weixin.qq.com",
+                "path": "/sns/oauth2/access_token",
+                "query_keys": ["appid", "code", "grant_type"],
+                "request_header_names": ["user-agent"],
+                "request_body_mime_type": "",
+                "has_request_body": False,
+                "response_status": 200,
+                "response_header_names": [],
+                "response_body_mime_type": "application/json",
+            },
+        ],
+    }
+
+    skeleton = protocol_sample.render_tencent_account_qr_config_skeleton(sample)
+
+    assert 'protocol_mode = "wechat_qrconnect"' in skeleton
+    assert 'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"' in skeleton
+    assert 'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"' in skeleton
+    assert 'redirect_uri = "http://127.0.0.1:8766/wechat/callback"' in skeleton
+    assert "?" not in skeleton
+    assert "code=" not in skeleton
+
+
 def test_account_qr_config_skeleton_cli_rejects_invalid_sample_without_writing_output(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -910,6 +1004,166 @@ def test_protocol_artifact_check_cli_rejects_sensitive_app_id_without_echoing_va
     assert "Tencent protocol artifact check failed" in output
     assert "app id" in output.lower()
     assert secret not in output
+
+
+def test_protocol_artifact_check_cli_accepts_wechat_qrconnect_endpoint_names(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sample_path = tmp_path / "wechat-login.sample.json"
+    config_path = tmp_path / "wechat-login.toml"
+    sample_path.write_text(
+        json.dumps(
+            {
+                "source": "redacted-har",
+                "provider": "wechat",
+                "flow": "account-login",
+                "entries": [
+                    {
+                        "index": 0,
+                        "method": "GET",
+                        "scheme": "https",
+                        "host": "open.weixin.qq.com",
+                        "path": "/connect/qrconnect",
+                        "query_keys": ["appid", "redirect_uri", "scope", "state"],
+                        "request_header_names": ["user-agent"],
+                        "request_body_mime_type": "",
+                        "has_request_body": False,
+                        "response_status": 200,
+                        "response_header_names": [],
+                        "response_body_mime_type": "text/html",
+                    },
+                    {
+                        "index": 1,
+                        "method": "GET",
+                        "scheme": "https",
+                        "host": "api.weixin.qq.com",
+                        "path": "/sns/oauth2/access_token",
+                        "query_keys": ["appid", "code", "grant_type"],
+                        "request_header_names": ["user-agent"],
+                        "request_body_mime_type": "",
+                        "has_request_body": False,
+                        "response_status": 200,
+                        "response_header_names": [],
+                        "response_body_mime_type": "application/json",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = false",
+                'protocol_mode = "wechat_qrconnect"',
+                'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
+                'redirect_uri = "https://login.example.test/wechat/callback"',
+                'app_id = "TODO-verified-app-id"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-artifact-check",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol artifacts passed" in output
+    assert "provider=wechat" in output
+    assert "access_token" not in output
+    assert "login.example.test" not in output
+
+
+def test_protocol_artifact_check_cli_accepts_qq_qrconnect_endpoint_names(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sample_path = tmp_path / "qq-login.sample.json"
+    config_path = tmp_path / "qq-login.toml"
+    sample_path.write_text(
+        json.dumps(
+            {
+                "source": "redacted-har",
+                "provider": "qq",
+                "flow": "account-login",
+                "entries": [
+                    {
+                        "index": 0,
+                        "method": "GET",
+                        "scheme": "https",
+                        "host": "graph.qq.com",
+                        "path": "/oauth2.0/authorize",
+                        "query_keys": ["client_id", "redirect_uri", "response_type", "state"],
+                        "request_header_names": ["user-agent"],
+                        "request_body_mime_type": "",
+                        "has_request_body": False,
+                        "response_status": 302,
+                        "response_header_names": [],
+                        "response_body_mime_type": "text/html",
+                    },
+                    {
+                        "index": 1,
+                        "method": "GET",
+                        "scheme": "https",
+                        "host": "graph.qq.com",
+                        "path": "/oauth2.0/token",
+                        "query_keys": ["client_id", "code", "grant_type"],
+                        "request_header_names": ["user-agent"],
+                        "request_body_mime_type": "",
+                        "has_request_body": False,
+                        "response_status": 200,
+                        "response_header_names": [],
+                        "response_body_mime_type": "application/json",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = false",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/qq/callback"',
+                'app_id = "TODO-verified-app-id"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-artifact-check",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol artifacts passed" in output
+    assert "provider=qq" in output
+    assert "graph.qq.com" not in output
+    assert "login.example.test" not in output
 
 
 def test_protocol_readiness_cli_blocks_unchecked_validation_note(
@@ -1269,6 +1523,169 @@ def test_protocol_config_check_cli_rejects_qq_ptlogin_for_wechat_without_values(
     assert exit_code == 2
     assert "Tencent protocol config check failed" in output
     assert "provider=wechat" in output
+    assert "protocol mode" in output.lower()
+    assert "open.weixin.qq.com" not in output
+    assert "verified-app" not in output
+
+
+def test_protocol_config_check_cli_accepts_qq_qrconnect_without_http_or_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/qq/callback"',
+                'app_id = "verified-app"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-check",
+            "--config",
+            str(config_path),
+            "--provider",
+            "qq",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol config check passed" in output
+    assert "provider=qq" in output
+    assert "real_http=not-called" in output
+    assert "graph.qq.com" not in output
+    assert "login.example.test" not in output
+    assert "verified-app" not in output
+
+
+def test_protocol_config_check_cli_rejects_qq_qrconnect_for_wechat_without_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/qq/callback"',
+                'app_id = "verified-app"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-check",
+            "--config",
+            str(config_path),
+            "--provider",
+            "wechat",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol config check failed" in output
+    assert "provider=wechat" in output
+    assert "protocol mode" in output.lower()
+    assert "graph.qq.com" not in output
+    assert "verified-app" not in output
+
+
+def test_protocol_config_check_cli_accepts_wechat_qrconnect_without_http_or_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = true",
+                'protocol_mode = "wechat_qrconnect"',
+                'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
+                'redirect_uri = "https://login.example.test/wechat/callback"',
+                'app_id = "verified-app"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-check",
+            "--config",
+            str(config_path),
+            "--provider",
+            "wechat",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol config check passed" in output
+    assert "provider=wechat" in output
+    assert "real_http=not-called" in output
+    assert "open.weixin.qq.com" not in output
+    assert "api.weixin.qq.com" not in output
+    assert "login.example.test" not in output
+    assert "verified-app" not in output
+
+
+def test_protocol_config_check_cli_rejects_wechat_qrconnect_for_qq_without_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "wechat_qrconnect"',
+                'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
+                'redirect_uri = "https://login.example.test/wechat/callback"',
+                'app_id = "verified-app"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-check",
+            "--config",
+            str(config_path),
+            "--provider",
+            "qq",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol config check failed" in output
+    assert "provider=qq" in output
     assert "protocol mode" in output.lower()
     assert "open.weixin.qq.com" not in output
     assert "verified-app" not in output

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import re
+import secrets
 import tomllib
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlsplit, urlunsplit
 
 import httpx
 import qrcode
@@ -23,12 +26,15 @@ from qr_live_scanner_tencent.interfaces import (
 
 TENCENT_QQ_QR_FETCH_URL = "https://example.invalid/tencent/account/qq/qr/fetch"
 TENCENT_QQ_QR_QUERY_URL = "https://example.invalid/tencent/account/qq/qr/query"
+TENCENT_QQ_QRCONNECT_OPENID_URL = "https://graph.qq.com/oauth2.0/me"
 TENCENT_WECHAT_QR_FETCH_URL = "https://example.invalid/tencent/account/wechat/qr/fetch"
 TENCENT_WECHAT_QR_QUERY_URL = "https://example.invalid/tencent/account/wechat/qr/query"
 TENCENT_DRY_RUN_QR_PREFIX = "qr-live-scanner-tencent://account-login/dry-run"
+TENCENT_QQ_APP_SECRET_ENV = "QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET"
+TENCENT_WECHAT_APP_SECRET_ENV = "QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET"
 ACCOUNT_QR_LOGIN_CONFIG_SECTION = "account_qr_login"
 ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS = frozenset(
-    {"validated_protocol", "fetch_url", "query_url", "app_id", "protocol_mode"}
+    {"validated_protocol", "fetch_url", "query_url", "app_id", "protocol_mode", "redirect_uri"}
 )
 ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS = frozenset(
     {
@@ -49,6 +55,7 @@ ACCOUNT_QR_LOGIN_SENSITIVE_VALUE_FRAGMENTS = frozenset(
     ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS | {"authorization", "qrsig", "scan_token"}
 )
 QQ_PTLOGIN_IMAGE_SIGNATURES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")
+SAFE_ENDPOINT_PATH_SEGMENTS = frozenset({"access_token", "refresh_token", "token"})
 QQ_PTLOGIN_UID_COOKIE_NAMES = ("uin", "ptui_loginuin")
 QQ_PTLOGIN_AUTH_COOKIE_NAMES = frozenset(
     {
@@ -74,6 +81,8 @@ class TencentAccountQRLoginState(StrEnum):
 class TencentAccountQRLoginProtocolMode(StrEnum):
     JSON_POST = "json_post"
     QQ_PTLOGIN = "qq_ptlogin"
+    QQ_QRCONNECT = "qq_qrconnect"
+    WECHAT_QRCONNECT = "wechat_qrconnect"
 
 
 class TencentAccountQRLoginError(Exception):
@@ -108,6 +117,7 @@ class TencentAccountQRLoginConfig:
     app_id: str = ""
     validated_protocol: bool = False
     protocol_mode: TencentAccountQRLoginProtocolMode = TencentAccountQRLoginProtocolMode.JSON_POST
+    redirect_uri: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "provider", TencentLoginProvider(str(self.provider)))
@@ -117,6 +127,11 @@ class TencentAccountQRLoginConfig:
             TencentAccountQRLoginProtocolMode(str(self.protocol_mode)),
         )
         _ensure_protocol_mode_supported(self.provider, self.protocol_mode)
+        object.__setattr__(
+            self,
+            "redirect_uri",
+            _redirect_uri_for_mode(self.protocol_mode, self.redirect_uri),
+        )
 
     def validated(
         self,
@@ -125,11 +140,16 @@ class TencentAccountQRLoginConfig:
         query_url: str,
         app_id: str,
         protocol_mode: TencentAccountQRLoginProtocolMode | str | None = None,
+        redirect_uri: str | None = None,
     ) -> TencentAccountQRLoginConfig:
         normalized_mode = (
             self.protocol_mode if protocol_mode is None else _protocol_mode(protocol_mode)
         )
         _ensure_protocol_mode_supported(self.provider, normalized_mode)
+        normalized_redirect_uri = _redirect_uri_for_mode(
+            normalized_mode,
+            redirect_uri if redirect_uri is not None else self.redirect_uri,
+        )
         return replace(
             self,
             fetch_url=_require_text(fetch_url, "Tencent account QR fetch URL is required"),
@@ -137,6 +157,7 @@ class TencentAccountQRLoginConfig:
             app_id=_require_text(app_id, "Tencent account QR app id is required"),
             validated_protocol=True,
             protocol_mode=normalized_mode,
+            redirect_uri=normalized_redirect_uri,
         )
 
 
@@ -193,6 +214,11 @@ def load_tencent_account_qr_login_config(
                 "protocol_mode",
                 TencentAccountQRLoginProtocolMode.JSON_POST.value,
             )
+        ),
+        redirect_uri=(
+            _require_redirect_uri(provider_section.get("redirect_uri"))
+            if "redirect_uri" in provider_section
+            else None
         ),
     )
 
@@ -268,11 +294,22 @@ class TencentAccountQRLoginService:
     client: httpx.AsyncClient | _TencentAccountQRDryRunClient
     device_id_store: LocalDeviceIdStore
     config: TencentAccountQRLoginConfig
+    oauth_callback_codes: dict[str, str] = field(default_factory=dict, repr=False)
+    oauth_callback_server: asyncio.AbstractServer | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    oauth_callback_path: str = field(default="", init=False, repr=False)
 
     async def fetch_qr(self) -> TencentAccountQRTicket:
         self._ensure_protocol_validated()
         if self.config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN:
             return await self._fetch_qr_qq_ptlogin()
+        if self.config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT:
+            return await self._fetch_qr_qq_qrconnect()
+        if self.config.protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT:
+            return await self._fetch_qr_wechat_qrconnect()
         device_id = self.device_id_store.get_or_create()
         try:
             response = await self.client.post(
@@ -305,6 +342,10 @@ class TencentAccountQRLoginService:
         self._ensure_protocol_validated()
         if self.config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN:
             return await self._query_qr_qq_ptlogin(ticket)
+        if self.config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT:
+            return await self._query_qr_qq_qrconnect(ticket)
+        if self.config.protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT:
+            return await self._query_qr_wechat_qrconnect(ticket)
         ticket_value = _ticket_value(ticket)
         device_id = (
             ticket.device_id
@@ -369,6 +410,11 @@ class TencentAccountQRLoginService:
         image = qrcode.make(ticket.qr_url)
         image.save(output_path)
 
+    def accept_oauth_callback(self, *, state: str, code: str) -> None:
+        state_value = _oauth_callback_value(state, "Tencent OAuth state is required")
+        code_value = _oauth_callback_value(code, "Tencent OAuth code is required")
+        self.oauth_callback_codes[state_value] = code_value
+
     def save_confirmed_session(
         self,
         status: TencentAccountQRLoginStatus,
@@ -431,7 +477,198 @@ class TencentAccountQRLoginService:
             session=_qq_session_from_response(self.config.provider, response),
         )
 
+    async def _fetch_qr_qq_qrconnect(self) -> TencentAccountQRTicket:
+        await self._start_oauth_callback_server_if_local()
+        device_id = self.device_id_store.get_or_create()
+        state = secrets.token_urlsafe(24)
+        qr_url = _qq_qrconnect_url(
+            self.config.fetch_url,
+            app_id=self.config.app_id,
+            redirect_uri=self.config.redirect_uri,
+            state=state,
+        )
+        return TencentAccountQRTicket(
+            provider=self.config.provider,
+            app_id=self.config.app_id,
+            ticket=state,
+            qr_url=qr_url,
+            device_id=device_id,
+        )
+
+    async def _query_qr_qq_qrconnect(
+        self,
+        ticket: str | TencentAccountQRTicket,
+    ) -> TencentAccountQRLoginStatus:
+        state = _ticket_value(ticket)
+        code = self.oauth_callback_codes.get(state)
+        if code is None:
+            return TencentAccountQRLoginStatus(
+                provider=self.config.provider,
+                state=TencentAccountQRLoginState.WAITING,
+            )
+        try:
+            response = await self.client.get(
+                self.config.query_url,
+                params=_qq_access_token_params(
+                    self.config.app_id,
+                    redirect_uri=self.config.redirect_uri,
+                    code=code,
+                ),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            msg = "Tencent account QR query HTTP failed"
+            raise TencentAccountQRLoginError(msg) from exc
+
+        payload = _qq_access_token_payload(response)
+        if not _optional_text(payload.get("openid")):
+            payload["openid"] = await self._fetch_qq_openid(payload)
+        self.oauth_callback_codes.pop(state, None)
+        return TencentAccountQRLoginStatus(
+            provider=self.config.provider,
+            state=TencentAccountQRLoginState.CONFIRMED,
+            session=_qq_oauth_session_from_payload(payload),
+        )
+
+    async def _fetch_qq_openid(self, payload: dict[str, Any]) -> str:
+        access_token = _require_text(
+            payload.get("access_token"),
+            "Tencent QQ confirmed session failed",
+        )
+        try:
+            response = await self.client.get(
+                TENCENT_QQ_QRCONNECT_OPENID_URL,
+                params={"access_token": access_token, "fmt": "json"},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            msg = "Tencent account QR query HTTP failed"
+            raise TencentAccountQRLoginError(msg) from exc
+        return _qq_openid_from_payload(response)
+
+    async def _fetch_qr_wechat_qrconnect(self) -> TencentAccountQRTicket:
+        await self._start_oauth_callback_server_if_local()
+        device_id = self.device_id_store.get_or_create()
+        state = secrets.token_urlsafe(24)
+        qr_url = _wechat_qrconnect_url(
+            self.config.fetch_url,
+            app_id=self.config.app_id,
+            redirect_uri=self.config.redirect_uri,
+            state=state,
+        )
+        return TencentAccountQRTicket(
+            provider=self.config.provider,
+            app_id=self.config.app_id,
+            ticket=state,
+            qr_url=qr_url,
+            device_id=device_id,
+        )
+
+    async def _start_oauth_callback_server_if_local(self) -> None:
+        if self.oauth_callback_server is not None:
+            return
+        parsed = urlparse(self.config.redirect_uri)
+        host = str(parsed.hostname or "")
+        if host not in {"127.0.0.1", "localhost", "::1"}:
+            return
+        port = parsed.port
+        if port is None:
+            msg = "Tencent OAuth local callback port is required"
+            raise TencentAccountQRLoginError(msg)
+        self.oauth_callback_path = parsed.path or "/"
+        try:
+            self.oauth_callback_server = await asyncio.start_server(
+                self._handle_oauth_callback,
+                host=host,
+                port=port,
+            )
+        except OSError as exc:
+            msg = "Tencent OAuth local callback server failed"
+            raise TencentAccountQRLoginError(msg) from exc
+
+    async def _handle_oauth_callback(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        status = 400
+        body = b"Tencent OAuth callback failed"
+        try:
+            request = await reader.readuntil(b"\r\n\r\n")
+            first_line = request.splitlines()[0].decode("ascii", errors="ignore")
+            method, target, _version = first_line.split(" ", 2)
+            if method.upper() != "GET":
+                status = 405
+                body = b"Tencent OAuth callback method rejected"
+            else:
+                parsed = urlsplit(target)
+                if parsed.path != self.oauth_callback_path:
+                    status = 404
+                    body = b"Tencent OAuth callback path rejected"
+                else:
+                    values = parse_qs(parsed.query, keep_blank_values=True)
+                    code = _first_query_value(values, "code")
+                    state = _first_query_value(values, "state")
+                    if code and state:
+                        self.accept_oauth_callback(state=state, code=code)
+                        status = 200
+                        body = b"Tencent OAuth callback received"
+        except Exception:
+            status = 400
+            body = b"Tencent OAuth callback failed"
+        finally:
+            reason = {
+                200: "OK",
+                400: "Bad Request",
+                404: "Not Found",
+                405: "Method Not Allowed",
+            }.get(status, "Bad Request")
+            header = (
+                f"HTTP/1.1 {status} {reason}\r\n"
+                "Content-Type: text/plain; charset=utf-8\r\n"
+                f"Content-Length: {len(body)}\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+            ).encode("ascii")
+            writer.write(header + body)
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+    async def _query_qr_wechat_qrconnect(
+        self,
+        ticket: str | TencentAccountQRTicket,
+    ) -> TencentAccountQRLoginStatus:
+        state = _ticket_value(ticket)
+        code = self.oauth_callback_codes.get(state)
+        if code is None:
+            return TencentAccountQRLoginStatus(
+                provider=self.config.provider,
+                state=TencentAccountQRLoginState.WAITING,
+            )
+        try:
+            response = await self.client.get(
+                self.config.query_url,
+                params=_wechat_access_token_params(self.config.app_id, code),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            msg = "Tencent account QR query HTTP failed"
+            raise TencentAccountQRLoginError(msg) from exc
+
+        payload = _wechat_access_token_payload(response)
+        self.oauth_callback_codes.pop(state, None)
+        return TencentAccountQRLoginStatus(
+            provider=self.config.provider,
+            state=TencentAccountQRLoginState.CONFIRMED,
+            session=_wechat_session_from_access_token_payload(payload),
+        )
+
     async def aclose(self) -> None:
+        if self.oauth_callback_server is not None:
+            self.oauth_callback_server.close()
+            await self.oauth_callback_server.wait_closed()
+            self.oauth_callback_server = None
         await self.client.aclose()
 
     def _ensure_protocol_validated(self) -> None:
@@ -503,11 +740,33 @@ def _ensure_protocol_mode_supported(
     provider: TencentLoginProvider,
     protocol_mode: TencentAccountQRLoginProtocolMode,
 ) -> None:
-    if protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN:
+    if protocol_mode in {
+        TencentAccountQRLoginProtocolMode.QQ_PTLOGIN,
+        TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+    }:
         normalized_provider = TencentLoginProvider(str(provider))
         if normalized_provider is not TencentLoginProvider.QQ:
             msg = "Tencent account QR protocol mode is not supported for provider"
             raise TencentAccountQRLoginError(msg)
+    if protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT:
+        normalized_provider = TencentLoginProvider(str(provider))
+        if normalized_provider is not TencentLoginProvider.WECHAT:
+            msg = "Tencent account QR protocol mode is not supported for provider"
+            raise TencentAccountQRLoginError(msg)
+
+
+def _redirect_uri_for_mode(
+    protocol_mode: TencentAccountQRLoginProtocolMode,
+    redirect_uri: str | None,
+) -> str:
+    if protocol_mode in {
+        TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+        TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+    }:
+        return _require_redirect_uri(redirect_uri)
+    if redirect_uri is None:
+        return ""
+    return _require_redirect_uri(redirect_uri) if str(redirect_uri).strip() else ""
 
 
 def _qq_ptlogin_fetch_params(app_id: str) -> dict[str, str]:
@@ -629,6 +888,204 @@ def _cookies_from_response(response: httpx.Response) -> dict[str, str]:
             if name and value:
                 cookies[name] = value
     return cookies
+
+
+def _qq_qrconnect_url(
+    endpoint_url: str,
+    *,
+    app_id: str,
+    redirect_uri: str,
+    state: str,
+) -> str:
+    parts = urlsplit(_require_endpoint_url(endpoint_url))
+    query = urlencode(
+        {
+            "response_type": "code",
+            "client_id": _require_app_id(app_id),
+            "redirect_uri": _require_redirect_uri(redirect_uri),
+            "state": _oauth_callback_value(state, "Tencent OAuth state is required"),
+            "scope": "get_user_info",
+        }
+    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
+
+
+def _qq_access_token_params(app_id: str, *, redirect_uri: str, code: str) -> dict[str, str]:
+    return {
+        "grant_type": "authorization_code",
+        "client_id": _require_app_id(app_id),
+        "client_secret": _qq_app_secret(),
+        "code": _oauth_callback_value(code, "Tencent OAuth code is required"),
+        "redirect_uri": _require_redirect_uri(redirect_uri),
+        "fmt": "json",
+        "need_openid": "1",
+    }
+
+
+def _qq_app_secret() -> str:
+    return _require_text(
+        os.environ.get(TENCENT_QQ_APP_SECRET_ENV),
+        "Tencent QQ app secret environment is required",
+    )
+
+
+def _qq_access_token_payload(response: httpx.Response) -> dict[str, Any]:
+    payload = _qq_oauth_response_payload(response, "Tencent QQ access token response failed")
+    if _optional_text(payload.get("error")) or _optional_text(payload.get("error_description")):
+        msg = "Tencent QQ access token response failed"
+        raise TencentAccountQRLoginError(msg)
+    if not _optional_text(payload.get("access_token")):
+        msg = "Tencent QQ access token response failed"
+        raise TencentAccountQRLoginError(msg)
+    return payload
+
+
+def _qq_openid_from_payload(response: httpx.Response) -> str:
+    payload = _qq_oauth_response_payload(response, "Tencent QQ openid response failed")
+    if _optional_text(payload.get("error")) or _optional_text(payload.get("error_description")):
+        msg = "Tencent QQ openid response failed"
+        raise TencentAccountQRLoginError(msg)
+    return _require_text(payload.get("openid"), "Tencent QQ openid response failed")
+
+
+def _qq_oauth_response_payload(response: httpx.Response, message: str) -> dict[str, Any]:
+    text = response.text.strip()
+    if not text:
+        raise TencentAccountQRLoginError(message)
+    try:
+        data = response.json()
+    except ValueError:
+        data = _parse_qq_oauth_text_response(text, message)
+    if not isinstance(data, dict):
+        raise TencentAccountQRLoginError(message)
+    return data
+
+
+def _parse_qq_oauth_text_response(text: str, message: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if stripped.startswith("callback(") and stripped.endswith(");"):
+        stripped = stripped[len("callback(") : -2].strip()
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise TencentAccountQRLoginError(message) from exc
+        if not isinstance(data, dict):
+            raise TencentAccountQRLoginError(message)
+        return data
+    parsed = parse_qs(stripped, keep_blank_values=True)
+    if not parsed:
+        raise TencentAccountQRLoginError(message)
+    return {key: values[0] for key, values in parsed.items() if values}
+
+
+def _qq_oauth_session_from_payload(payload: dict[str, Any]) -> TencentSession:
+    openid = _require_text(payload.get("openid"), "Tencent QQ confirmed session failed")
+    credentials: dict[str, str] = {
+        "access_token": _require_text(
+            payload.get("access_token"),
+            "Tencent QQ confirmed session failed",
+        ),
+        "openid": openid,
+    }
+    optional_fields = ("refresh_token", "scope", "expires_in", "client_id")
+    for field_name in optional_fields:
+        value = _optional_text(payload.get(field_name))
+        if value:
+            credentials[field_name] = value
+    return TencentSession(
+        uid=openid,
+        provider=TencentLoginProvider.QQ,
+        credentials=credentials,
+    )
+
+
+def _wechat_qrconnect_url(
+    endpoint_url: str,
+    *,
+    app_id: str,
+    redirect_uri: str,
+    state: str,
+) -> str:
+    parts = urlsplit(_require_endpoint_url(endpoint_url))
+    query = urlencode(
+        {
+            "appid": _require_app_id(app_id),
+            "redirect_uri": _require_redirect_uri(redirect_uri),
+            "response_type": "code",
+            "scope": "snsapi_login",
+            "state": _oauth_callback_value(state, "Tencent OAuth state is required"),
+        }
+    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, "wechat_redirect"))
+
+
+def _wechat_access_token_params(app_id: str, code: str) -> dict[str, str]:
+    return {
+        "appid": _require_app_id(app_id),
+        "secret": _wechat_app_secret(),
+        "code": _oauth_callback_value(code, "Tencent OAuth code is required"),
+        "grant_type": "authorization_code",
+    }
+
+
+def _wechat_app_secret() -> str:
+    return _require_text(
+        os.environ.get(TENCENT_WECHAT_APP_SECRET_ENV),
+        "Tencent WeChat app secret environment is required",
+    )
+
+
+def _wechat_access_token_payload(response: httpx.Response) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except ValueError as exc:
+        msg = "Tencent WeChat access token response failed"
+        raise TencentAccountQRLoginError(msg) from exc
+    if not isinstance(data, dict):
+        msg = "Tencent WeChat access token response failed"
+        raise TencentAccountQRLoginError(msg)
+    errcode = data.get("errcode")
+    if errcode not in (None, 0, "0"):
+        msg = "Tencent WeChat access token response failed"
+        raise TencentAccountQRLoginError(msg)
+    return data
+
+
+def _wechat_session_from_access_token_payload(payload: dict[str, Any]) -> TencentSession:
+    openid = _require_text(payload.get("openid"), "Tencent WeChat confirmed session failed")
+    unionid = str(payload.get("unionid") or "").strip()
+    uid = unionid or openid
+    credentials: dict[str, str] = {
+        "access_token": _require_text(
+            payload.get("access_token"),
+            "Tencent WeChat confirmed session failed",
+        ),
+        "openid": openid,
+    }
+    optional_fields = ("refresh_token", "scope", "unionid", "expires_in")
+    for field_name in optional_fields:
+        value = payload.get(field_name)
+        if value is not None and str(value).strip():
+            credentials[field_name] = str(value).strip()
+    return TencentSession(
+        uid=uid,
+        provider=TencentLoginProvider.WECHAT,
+        credentials=credentials,
+    )
+
+
+def _oauth_callback_value(value: object, message: str) -> str:
+    text = _require_text(value, message)
+    if any(char in text for char in "\r\n"):
+        raise TencentAccountQRLoginError(message)
+    return text
+
+
+def _first_query_value(values: dict[str, list[str]], name: str) -> str:
+    candidates = values.get(name, [])
+    if not candidates:
+        return ""
+    return str(candidates[0] or "").strip()
 
 
 def _response_payload(response: httpx.Response, message: str) -> dict[str, Any]:
@@ -791,10 +1248,30 @@ def _require_app_id(value: object) -> str:
     return app_id
 
 
+def _require_redirect_uri(value: object) -> str:
+    redirect_uri = _require_text(value, "Tencent account QR redirect URI is required")
+    if "\r" in redirect_uri or "\n" in redirect_uri:
+        msg = "Tencent account QR redirect URI is invalid"
+        raise TencentAccountQRLoginError(msg)
+    parsed = urlparse(redirect_uri)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        msg = "Tencent account QR redirect URI is invalid"
+        raise TencentAccountQRLoginError(msg)
+    if parsed.query or parsed.fragment:
+        msg = "Tencent account QR redirect URI must not include signed endpoint data"
+        raise TencentAccountQRLoginError(msg)
+    if _endpoint_path_contains_sensitive_data(parsed.path):
+        msg = "Tencent account QR redirect URI must not include signed endpoint data"
+        raise TencentAccountQRLoginError(msg)
+    return redirect_uri
+
+
 def _endpoint_path_contains_sensitive_data(path: str) -> bool:
     for segment in path.split("/"):
         decoded = unquote(segment).strip().lower()
         if not decoded:
+            continue
+        if decoded in SAFE_ENDPOINT_PATH_SEGMENTS:
             continue
         if any(fragment in decoded for fragment in ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS):
             return True
@@ -815,3 +1292,7 @@ def _require_text(value: object, message: str) -> str:
     if not text:
         raise TencentAccountQRLoginError(message)
     return text
+
+
+def _optional_text(value: object) -> str:
+    return str(value or "").strip()

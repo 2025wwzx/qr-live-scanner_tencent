@@ -11,11 +11,13 @@ from qr_live_scanner_tencent.accounts.tencent_qr_login import (
     ACCOUNT_QR_LOGIN_CONFIG_SECTION,
     ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS,
     ACCOUNT_QR_LOGIN_SENSITIVE_VALUE_FRAGMENTS,
+    SAFE_ENDPOINT_PATH_SEGMENTS,
     TencentAccountQRLoginProtocolMode,
 )
 from qr_live_scanner_tencent.interfaces import TencentLoginProvider
 from qr_live_scanner_tencent.security.har import (
     REDACTED_VALUE,
+    SENSITIVE_EXACT_KEYS,
     SENSITIVE_KEYWORDS,
     SENSITIVE_PATH_KEYWORDS,
 )
@@ -50,6 +52,8 @@ ACCOUNT_QR_QUERY_ENDPOINT_KEYWORDS = (
     "status",
     "login",
     "ptqrlogin",
+    "token",
+    "access_token",
 )
 TENCENT_PROTOCOL_SAMPLE_ARTIFACT_FIELDS = frozenset(
     {"source", "provider", "flow", "entries"}
@@ -286,15 +290,33 @@ def render_tencent_account_qr_config_skeleton(sample: dict[str, Any]) -> str:
         fallback_kind="query",
         excluded_url=fetch_url,
     )
+    protocol_mode = _account_config_protocol_mode(
+        provider=provider,
+        fetch_url=fetch_url,
+        query_url=query_url,
+    )
+    redirect_uri = _account_config_redirect_uri(provider=provider, protocol_mode=protocol_mode)
 
     lines = [
         f"[account_qr_login.{provider.value}]",
         "validated_protocol = false",
-        f'fetch_url = "{_toml_string(fetch_url)}"',
-        f'query_url = "{_toml_string(query_url)}"',
-        f'app_id = "{ACCOUNT_QR_CONFIG_SKELETON_APP_ID}"',
-        "",
     ]
+    if protocol_mode is not None:
+        lines.append(f'protocol_mode = "{protocol_mode.value}"')
+    lines.extend(
+        [
+            f'fetch_url = "{_toml_string(fetch_url)}"',
+            f'query_url = "{_toml_string(query_url)}"',
+        ]
+    )
+    if redirect_uri:
+        lines.append(f'redirect_uri = "{_toml_string(redirect_uri)}"')
+    lines.extend(
+        [
+            f'app_id = "{ACCOUNT_QR_CONFIG_SKELETON_APP_ID}"',
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -428,6 +450,8 @@ def _validate_account_qr_config_provider_artifact(
         raise ValueError("protocol config validated_protocol must remain false")
     _validate_artifact_endpoint_url(provider_section.get("fetch_url"))
     _validate_artifact_endpoint_url(provider_section.get("query_url"))
+    if "redirect_uri" in provider_section:
+        _validate_artifact_endpoint_url(provider_section.get("redirect_uri"))
     _validate_artifact_app_id(
         _required_text(provider_section.get("app_id"), "protocol config app id is required"),
     )
@@ -444,6 +468,16 @@ def _validate_artifact_protocol_mode(value: object, *, provider: TencentLoginPro
     if (
         protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN
         and provider is not TencentLoginProvider.QQ
+    ):
+        raise ValueError("protocol config protocol mode is unsupported")
+    if (
+        protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT
+        and provider is not TencentLoginProvider.QQ
+    ):
+        raise ValueError("protocol config protocol mode is unsupported")
+    if (
+        protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT
+        and provider is not TencentLoginProvider.WECHAT
     ):
         raise ValueError("protocol config protocol mode is unsupported")
 
@@ -661,6 +695,63 @@ def _account_config_fallback_url(provider: TencentLoginProvider, kind: str) -> s
     return f"https://example.invalid/tencent/account/{provider.value}/qr/{kind}"
 
 
+def _account_config_protocol_mode(
+    *,
+    provider: TencentLoginProvider,
+    fetch_url: str,
+    query_url: str,
+) -> TencentAccountQRLoginProtocolMode | None:
+    fetch = urlparse(fetch_url)
+    query = urlparse(query_url)
+    fetch_host = fetch.netloc.lower()
+    query_host = query.netloc.lower()
+    fetch_path = fetch.path.lower()
+    query_path = query.path.lower()
+    if (
+        provider is TencentLoginProvider.QQ
+        and fetch_host == "ssl.ptlogin2.qq.com"
+        and query_host == "ssl.ptlogin2.qq.com"
+        and "ptqrshow" in fetch_path
+        and "ptqrlogin" in query_path
+    ):
+        return TencentAccountQRLoginProtocolMode.QQ_PTLOGIN
+    if (
+        provider is TencentLoginProvider.QQ
+        and fetch_host == "graph.qq.com"
+        and query_host == "graph.qq.com"
+        and "/oauth2.0/authorize" in fetch_path
+        and "/oauth2.0/token" in query_path
+    ):
+        return TencentAccountQRLoginProtocolMode.QQ_QRCONNECT
+    if (
+        provider is TencentLoginProvider.WECHAT
+        and fetch_host == "open.weixin.qq.com"
+        and query_host == "api.weixin.qq.com"
+        and "/connect/qrconnect" in fetch_path
+        and "/sns/oauth2/access_token" in query_path
+    ):
+        return TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT
+    return None
+
+
+def _account_config_redirect_uri(
+    *,
+    provider: TencentLoginProvider,
+    protocol_mode: TencentAccountQRLoginProtocolMode | None,
+) -> str:
+    if (
+        provider is TencentLoginProvider.QQ
+        and protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT
+    ):
+        return "http://127.0.0.1:8765/qq/callback"
+    if (
+        provider is TencentLoginProvider.WECHAT
+        and protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT
+    ):
+        return "http://127.0.0.1:8766/wechat/callback"
+    return ""
+
+
 def _toml_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
@@ -755,11 +846,15 @@ def _normalize_name(value: object) -> str:
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
+    if lowered in SENSITIVE_EXACT_KEYS:
+        return True
     return any(keyword in lowered for keyword in SENSITIVE_KEYWORDS)
 
 
 def _is_sensitive_path_segment(segment: str) -> bool:
     lowered = segment.lower()
+    if lowered in SAFE_ENDPOINT_PATH_SEGMENTS:
+        return False
     if any(keyword in lowered for keyword in SENSITIVE_PATH_KEYWORDS):
         return True
     if lowered.isdigit() and len(lowered) >= 5:

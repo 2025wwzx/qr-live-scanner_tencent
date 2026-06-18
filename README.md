@@ -213,6 +213,39 @@ query_url = "https://example.test/qq/query"
 app_id = "your-app-id"
 ```
 
+Supported real-shape account protocol modes:
+
+```toml
+[account_qr_login.qq]
+validated_protocol = true
+protocol_mode = "qq_ptlogin"
+fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow"
+query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"
+app_id = "your-verified-qq-app-id"
+
+[account_qr_login.qq]
+validated_protocol = true
+protocol_mode = "qq_qrconnect"
+fetch_url = "https://graph.qq.com/oauth2.0/authorize"
+query_url = "https://graph.qq.com/oauth2.0/token"
+redirect_uri = "http://127.0.0.1:8765/qq/callback"
+app_id = "your-verified-qq-connect-app-id"
+
+[account_qr_login.wechat]
+validated_protocol = true
+protocol_mode = "wechat_qrconnect"
+fetch_url = "https://open.weixin.qq.com/connect/qrconnect"
+query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"
+redirect_uri = "http://127.0.0.1:8766/wechat/callback"
+app_id = "your-verified-wechat-app-id"
+```
+
+For QQ Connect, set `QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET` in the local
+environment before running `tencent-login`. For WeChat, set
+`QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET`. Never write the app secret, OAuth
+code, access token, refresh token, openid, unionid, Cookie, QR payload, or full
+signed URL into TOML, docs, logs, or git.
+
 ```powershell
 qr-live-scanner-tencent tencent-protocol-config-check --provider qq --config .\profiles\tencent-account-login.toml
 qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml

@@ -65,7 +65,48 @@ app_id = "verified-qq-app-id"
 `qq_ptlogin` writes the QR image bytes returned by the fetch endpoint, carries
 the runtime `qrsig` only in memory, computes `ptqrtoken`, maps `ptuiCB(...)`
 poll states, and saves confirmed QQ cookies into `TencentSession.credentials`.
-WeChat still needs its own verified protocol mode before real HTTP is enabled.
+
+QQ can also opt into the official QQ Connect authorization-code QR shape after
+local verification:
+
+```toml
+[account_qr_login.qq]
+validated_protocol = true
+protocol_mode = "qq_qrconnect"
+fetch_url = "https://graph.qq.com/oauth2.0/authorize"
+query_url = "https://graph.qq.com/oauth2.0/token"
+redirect_uri = "http://127.0.0.1:8765/qq/callback"
+app_id = "verified-qq-connect-app-id"
+```
+
+`qq_qrconnect` renders the QQ Connect authorization URL as the QR payload. If
+`redirect_uri` points to `127.0.0.1`, `localhost`, or `::1`, the service starts
+a temporary local callback listener, captures `code` and `state` only in memory,
+then exchanges the code for a `TencentSession`. The QQ Connect app secret must
+be provided through the local environment variable
+`QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET`; never put it in TOML, docs, logs, or
+git.
+
+WeChat can opt into the website OAuth QR-connect shape after local verification:
+
+```toml
+[account_qr_login.wechat]
+validated_protocol = true
+protocol_mode = "wechat_qrconnect"
+fetch_url = "https://open.weixin.qq.com/connect/qrconnect"
+query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"
+redirect_uri = "http://127.0.0.1:8766/wechat/callback"
+app_id = "verified-wechat-app-id"
+```
+
+`wechat_qrconnect` renders the OAuth authorization URL as the QR payload. If
+`redirect_uri` points to `127.0.0.1`, `localhost`, or `::1`, the service starts
+a temporary local callback listener, captures `code` and `state` only in memory,
+then exchanges the code for a `TencentSession`. The WeChat app secret must be
+provided through the local environment variable
+`QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET`; never put it in TOML, docs, logs,
+or git. If the redirect URI is a public/tunnel URL, it must forward to the same
+local callback path for the CLI flow to finish.
 
 Use it only with clean endpoint URLs:
 

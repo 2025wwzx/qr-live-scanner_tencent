@@ -24,6 +24,7 @@ SENSITIVE_KEYWORDS = (
     "token",
     "uid",
 )
+SENSITIVE_EXACT_KEYS = frozenset({"auth_code", "authorization_code", "code"})
 SENSITIVE_PATH_KEYWORDS = (
     "access_key",
     "account_id",
@@ -44,6 +45,7 @@ SENSITIVE_PATH_KEYWORDS = (
     "uid",
 )
 REDACTED_VALUE = "[REDACTED]"
+SAFE_ENDPOINT_PATH_SEGMENTS = frozenset({"access_token", "refresh_token", "token"})
 
 
 def redact_har(har: dict[str, Any]) -> dict[str, Any]:
@@ -125,6 +127,8 @@ def _redact_path(path: str) -> str:
 
 def _is_sensitive_path_segment(segment: str) -> bool:
     lowered = segment.lower()
+    if lowered in SAFE_ENDPOINT_PATH_SEGMENTS:
+        return False
     if any(keyword in lowered for keyword in SENSITIVE_PATH_KEYWORDS):
         return True
     if lowered.isdigit() and len(lowered) >= 5:
@@ -140,4 +144,6 @@ def _is_sensitive_path_segment(segment: str) -> bool:
 
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
+    if lowered in SENSITIVE_EXACT_KEYS:
+        return True
     return any(keyword in lowered for keyword in SENSITIVE_KEYWORDS)
