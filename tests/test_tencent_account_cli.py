@@ -289,6 +289,61 @@ def test_tencent_login_preflight_rejects_busy_callback_bind_port(
     assert str(unused_tcp_port) not in output
 
 
+def test_tencent_login_preflight_accepts_callback_file_handoff_without_bind(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    callback_file = tmp_path / "oauth-callback.txt"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/oauth/qq/callback"',
+                'app_id = "verified-qq-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_if_http_client_is_created(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("preflight must not create HTTP client")
+
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", "SECRET_QQ_APP_SECRET")
+    monkeypatch.setattr(httpx, "AsyncClient", fail_if_http_client_is_created)
+
+    exit_code = _run_main(
+        [
+            "tencent-login-preflight",
+            "--provider",
+            "qq",
+            "--protocol-config",
+            str(config_path),
+            "--callback-url-file",
+            str(callback_file),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent account login preflight passed" in output
+    assert "provider=qq" in output
+    assert "protocol_mode=qq_qrconnect" in output
+    assert "secret_env=present" in output
+    assert "callback_bind=file-handoff" in output
+    assert "real_http=not-called" in output
+    assert "SECRET_QQ_APP_SECRET" not in output
+    assert "graph.qq.com" not in output
+    assert "login.example.test" not in output
+    assert "verified-qq-app" not in output
+    assert str(callback_file) not in output
+
+
 def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1032,6 +1087,106 @@ def test_tencent_login_cli_passes_callback_url_file(
     assert exit_code == 0
     assert captured_callback_files == [callback_file]
     assert "Tencent account session saved" in output
+    assert str(callback_file) not in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "10001" not in output
+
+
+def test_tencent_login_cli_loads_oauth_config_without_bind_for_callback_file(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    callback_file = tmp_path / "oauth-callback.txt"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/oauth/qq/callback"',
+                'app_id = "verified-qq-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    captured: list[tuple[str, str | None]] = []
+
+    async def fake_capture(
+        service: object,
+        *,
+        qr_output_path: Path,
+        timeout_seconds: float,
+        poll_interval_seconds: float,
+        open_qr: bool = False,
+        open_provider_page: bool = False,
+        callback_url_file: Path | None = None,
+    ) -> TencentSession:
+        assert qr_output_path == tmp_path / "tencent-login.png"
+        assert timeout_seconds == 3
+        assert poll_interval_seconds == 0.01
+        assert open_qr is False
+        assert open_provider_page is False
+        assert hasattr(service, "config")
+        captured.append((service.config.callback_bind_url, str(callback_url_file)))
+        return TencentSession(
+            uid="10001",
+            provider=TencentLoginProvider.QQ,
+            credentials={"access_token": "SECRET_ACCESS_TOKEN", "openid": "SECRET_OPENID"},
+        )
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.saved: list[tuple[TencentSession, bool]] = []
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            self.saved.append((session, authorized))
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return [
+                TencentAccountIndexEntry(
+                    uid=session.uid,
+                    provider=session.provider,
+                    authorized=authorized,
+                )
+                for session, authorized in self.saved
+            ]
+
+    monkeypatch.setattr(main_module, "_capture_tencent_session_from_qr", fake_capture)
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(
+        [
+            "tencent-login",
+            "--provider",
+            "qq",
+            "--protocol-config",
+            str(config_path),
+            "--callback-url-file",
+            str(callback_file),
+            "--qr-output",
+            str(tmp_path / "tencent-login.png"),
+            "--timeout-seconds",
+            "3",
+            "--poll-interval-seconds",
+            "0.01",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured == [("", str(callback_file))]
+    assert "Tencent account session saved" in output
+    assert "login.example.test" not in output
+    assert "verified-qq-app" not in output
     assert str(callback_file) not in output
     assert "SECRET_ACCESS_TOKEN" not in output
     assert "10001" not in output

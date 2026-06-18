@@ -238,6 +238,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=TencentLoginProvider.QQ.value,
     )
     tencent_login_preflight_parser.add_argument("--protocol-config", required=True)
+    tencent_login_preflight_parser.add_argument("--callback-url-file")
 
     tencent_list_parser = subparsers.add_parser("tencent-list")
     tencent_list_parser.add_argument(
@@ -1112,9 +1113,15 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
             print("Tencent account login dry-run ready")
             return 0
 
+        callback_url_file = (
+            Path(callback_url_file_text)
+            if (callback_url_file_text := _optional_text(args.callback_url_file))
+            else None
+        )
         service = _new_tencent_account_qr_login_service(
             provider,
             protocol_config_path=_optional_text(args.protocol_config),
+            require_callback_bind_url=callback_url_file is None,
         )
         session = asyncio.run(
             _capture_tencent_session_from_qr(
@@ -1124,11 +1131,7 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
                 poll_interval_seconds=poll_interval_seconds,
                 open_qr=bool(args.open_qr),
                 open_provider_page=bool(args.open_provider_page),
-                callback_url_file=(
-                    Path(callback_url_file)
-                    if (callback_url_file := _optional_text(args.callback_url_file))
-                    else None
-                ),
+                callback_url_file=callback_url_file,
             )
         )
         if session.provider is not provider:
@@ -1151,9 +1154,21 @@ def _run_tencent_login_preflight(args: argparse.Namespace) -> int:
     provider = TencentLoginProvider(str(args.provider))
     try:
         config_path = Path(_required_text(args.protocol_config, "protocol config path"))
-        config = load_tencent_account_qr_login_config(config_path, provider)
+        callback_url_file = (
+            Path(callback_url_file_text)
+            if (callback_url_file_text := _optional_text(args.callback_url_file))
+            else None
+        )
+        config = load_tencent_account_qr_login_config(
+            config_path,
+            provider,
+            require_callback_bind_url=callback_url_file is None,
+        )
         secret_state = _check_tencent_login_preflight_secret(config)
-        callback_state = _check_tencent_login_preflight_callback_bind(config)
+        callback_state = _check_tencent_login_preflight_callback_bind(
+            config,
+            callback_url_file=callback_url_file,
+        )
     except (OSError, ValueError, QRLiveScannerError, TencentAccountQRLoginError) as exc:
         print(
             "[WARN] Tencent account login preflight failed: "
@@ -1401,11 +1416,16 @@ def _new_tencent_account_qr_login_service(
     provider: TencentLoginProvider,
     *,
     protocol_config_path: str | Path | None = None,
+    require_callback_bind_url: bool = True,
 ) -> TencentAccountQRLoginService:
     if protocol_config_path is None:
         config = TencentAccountQRLoginService.default_configs()[provider]
     else:
-        config = load_tencent_account_qr_login_config(protocol_config_path, provider)
+        config = load_tencent_account_qr_login_config(
+            protocol_config_path,
+            provider,
+            require_callback_bind_url=require_callback_bind_url,
+        )
     return TencentAccountQRLoginService(
         client=httpx.AsyncClient(timeout=10.0),
         device_id_store=LocalDeviceIdStore.default(),
@@ -1435,8 +1455,12 @@ def _tencent_login_secret_env_name(
 
 def _check_tencent_login_preflight_callback_bind(
     config: TencentAccountQRLoginConfig,
+    *,
+    callback_url_file: Path | None = None,
 ) -> str:
     if not config.callback_bind_url:
+        if callback_url_file is not None:
+            return "file-handoff"
         return "not-required"
     parsed = urlparse(config.callback_bind_url)
     host = str(parsed.hostname or "")

@@ -249,7 +249,9 @@ code, access token, refresh token, openid, unionid, Cookie, QR payload, or full
 signed URL into TOML, docs, logs, or git.
 For mobile QR scans, register or tunnel the public `redirect_uri` to the local
 `callback_bind_url`; the local bind URL must stay on `127.0.0.1`, `localhost`,
-or `::1`.
+or `::1`. If using manual callback-file handoff, `callback_bind_url` may be
+omitted from the local TOML and the public `redirect_uri` can stay registered
+with QQ/WeChat.
 Use `--open-qr` to open the locally generated QR image, or
 `--open-provider-page` to open the official QQ/WeChat authorization page for
 OAuth QR-connect modes. Neither option prints the full authorization URL.
@@ -261,7 +263,7 @@ it in memory, accepts the callback, and then attempts to delete the file.
 
 ```powershell
 qr-live-scanner-tencent tencent-protocol-config-check --provider qq --config .\profiles\tencent-account-login.toml
-qr-live-scanner-tencent tencent-login-preflight --provider qq --protocol-config .\profiles\tencent-account-login.toml
+qr-live-scanner-tencent tencent-login-preflight --provider qq --protocol-config .\profiles\tencent-account-login.toml --callback-url-file .\work\tencent-oauth-callback.txt
 qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml --open-provider-page --callback-url-file .\work\tencent-oauth-callback.txt
 ```
 

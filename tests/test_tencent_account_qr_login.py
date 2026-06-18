@@ -273,6 +273,36 @@ def test_load_tencent_account_qr_login_config_requires_bind_for_public_redirect(
     assert "login.example.test" not in str(exc_info.value)
 
 
+def test_load_tencent_account_qr_login_config_allows_public_redirect_for_file_handoff(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = true",
+                'protocol_mode = "wechat_qrconnect"',
+                'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
+                'redirect_uri = "https://login.example.test/wechat/callback"',
+                'app_id = "wechat-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_tencent_account_qr_login_config(
+        config_path,
+        TencentLoginProvider.WECHAT,
+        require_callback_bind_url=False,
+    )
+
+    assert config.protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT
+    assert config.redirect_uri == "https://login.example.test/wechat/callback"
+    assert config.callback_bind_url == ""
+
+
 @pytest.mark.asyncio
 async def test_tencent_account_qr_login_rejects_unvalidated_config_before_http() -> None:
     called = False

@@ -122,12 +122,14 @@ qr-live-scanner-tencent tencent-protocol-config-check `
 
 qr-live-scanner-tencent tencent-login-preflight `
   --provider qq `
-  --protocol-config profiles/tencent-account-login.toml
+  --protocol-config profiles/tencent-account-login.toml `
+  --callback-url-file work/tencent-oauth-callback.txt
 
 qr-live-scanner-tencent tencent-login `
   --provider qq `
   --protocol-config profiles/tencent-account-login.toml `
-  --open-qr
+  --open-provider-page `
+  --callback-url-file work/tencent-oauth-callback.txt
 ```
 
 The config loader rejects sensitive field names, sensitive `app_id` values,
@@ -149,6 +151,8 @@ handoff. Paste the provider redirect URL into that ignored local file only; it
 contains temporary OAuth code/state data and must never be committed or shared.
 The running command accepts the callback from the file and then attempts to
 delete it.
+In this file-handoff mode, `callback_bind_url` may be omitted from the local
+TOML; without file handoff, public redirects still require a local bind URL.
 
 ## Required Validation
 

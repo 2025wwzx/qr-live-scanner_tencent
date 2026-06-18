@@ -189,6 +189,8 @@ class TencentAccountQRLoginConfig:
 def load_tencent_account_qr_login_config(
     path: str | Path,
     provider: TencentLoginProvider,
+    *,
+    require_callback_bind_url: bool = True,
 ) -> TencentAccountQRLoginConfig:
     """从本地 TOML 加载已验证的腾讯账号二维码登录配置。
 
@@ -251,7 +253,8 @@ def load_tencent_account_qr_login_config(
             else None
         ),
     )
-    _ensure_loadable_oauth_config_has_callback_bind_url(config)
+    if require_callback_bind_url:
+        _ensure_loadable_oauth_config_has_callback_bind_url(config)
     return config
 
 
