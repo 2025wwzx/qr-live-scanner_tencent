@@ -76,6 +76,7 @@ A sanitized rehearsal pack is committed at
 artifact and readiness gates before collecting real captures:
 
 ```powershell
+qr-live-scanner-tencent tencent-protocol-example-check
 qr-live-scanner-tencent tencent-protocol-artifact-check --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json --config examples/tencent-protocol-research-pack/qq-account-login.toml
 qr-live-scanner-tencent tencent-protocol-readiness --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json --config examples/tencent-protocol-research-pack/qq-account-login.toml --note examples/tencent-protocol-research-pack/qq-account-login.note.md
 ```

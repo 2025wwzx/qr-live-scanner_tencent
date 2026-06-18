@@ -1105,6 +1105,28 @@ def test_sanitized_research_pack_example_passes_local_gates(
     assert "real_http=disabled" in readiness_output
 
 
+def test_protocol_example_check_cli_runs_sanitized_pack_without_values(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = _run_main(["tencent-protocol-example-check"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol example check passed" in output
+    assert "artifacts=passed" in output
+    assert "readiness=passed" in output
+    assert "provider=qq" in output
+    assert "entries=2" in output
+    assert "real_http=disabled" in output
+    assert "SECRET" not in output
+    assert "[REDACTED]" not in output
+    assert "access_token" not in output
+    assert "openid" not in output
+    assert "qrsig" not in output
+    assert "Cookie:" not in output
+    assert "ticket=" not in output
+
+
 def test_protocol_config_check_cli_accepts_validated_config_without_http_or_values(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

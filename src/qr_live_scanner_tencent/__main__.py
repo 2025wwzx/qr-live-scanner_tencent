@@ -58,6 +58,10 @@ from qr_live_scanner_tencent.smoke import (
 )
 
 ENV_VAR_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+TENCENT_PROTOCOL_EXAMPLE_PACK_DIR = Path("examples/tencent-protocol-research-pack")
+TENCENT_PROTOCOL_EXAMPLE_SAMPLE = "qq-account-login.sample.json"
+TENCENT_PROTOCOL_EXAMPLE_CONFIG = "qq-account-login.toml"
+TENCENT_PROTOCOL_EXAMPLE_NOTE = "qq-account-login.note.md"
 
 
 class TencentAccountQRLoginServiceProtocol(Protocol):
@@ -93,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_protocol_config_skeleton(args)
     if args.command == "tencent-protocol-config-check":
         return _run_tencent_protocol_config_check(args)
+    if args.command == "tencent-protocol-example-check":
+        return _run_tencent_protocol_example_check(args)
     if args.command == "tencent-protocol-artifact-check":
         return _run_tencent_protocol_artifact_check(args)
     if args.command == "tencent-protocol-readiness":
@@ -281,6 +287,8 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=[provider.value for provider in TencentLoginProvider],
         default=TencentLoginProvider.QQ.value,
     )
+
+    subparsers.add_parser("tencent-protocol-example-check")
 
     protocol_artifact_check_parser = subparsers.add_parser("tencent-protocol-artifact-check")
     protocol_artifact_check_parser.add_argument("--sample", required=True)
@@ -651,6 +659,68 @@ def _run_tencent_protocol_config_check(args: argparse.Namespace) -> int:
                 "endpoints=2",
                 "app_id=present",
                 "real_http=not-called",
+            ]
+        )
+    )
+    return 0
+
+
+def _run_tencent_protocol_example_check(_args: argparse.Namespace) -> int:
+    sample_path = TENCENT_PROTOCOL_EXAMPLE_PACK_DIR / TENCENT_PROTOCOL_EXAMPLE_SAMPLE
+    config_path = TENCENT_PROTOCOL_EXAMPLE_PACK_DIR / TENCENT_PROTOCOL_EXAMPLE_CONFIG
+    note_path = TENCENT_PROTOCOL_EXAMPLE_PACK_DIR / TENCENT_PROTOCOL_EXAMPLE_NOTE
+    try:
+        with sample_path.open("r", encoding="utf-8-sig") as file:
+            sample = json.load(file)
+        if not isinstance(sample, dict):
+            msg = "protocol sample root must be a JSON object"
+            raise ValueError(msg)
+        with config_path.open("rb") as file:
+            config = tomllib.load(file)
+        note_text = note_path.read_text(encoding="utf-8-sig")
+        check_tencent_protocol_artifacts(sample, config)
+        readiness = check_tencent_protocol_readiness(sample, config, note_text)
+    except OSError:
+        print("[WARN] Tencent protocol example check failed: example files could not be read")
+        return 2
+    except json.JSONDecodeError:
+        print("[WARN] Tencent protocol example check failed: protocol sample could not be parsed")
+        return 2
+    except tomllib.TOMLDecodeError:
+        print("[WARN] Tencent protocol example check failed: protocol config could not be parsed")
+        return 2
+    except ValueError as exc:
+        print(f"[WARN] Tencent protocol example check failed: {exc}")
+        return 2
+
+    if not readiness.ready:
+        print("Tencent protocol example check blocked")
+        print(
+            " ".join(
+                [
+                    "artifacts=passed",
+                    "readiness=blocked",
+                    f"provider={readiness.provider.value}",
+                    f"flow={readiness.flow}",
+                    f"entries={readiness.entry_count}",
+                    f"checked={readiness.checked_count}/{readiness.total_count}",
+                    "real_http=disabled",
+                ]
+            )
+        )
+        return 1
+
+    print("Tencent protocol example check passed")
+    print(
+        " ".join(
+            [
+                "artifacts=passed",
+                "readiness=passed",
+                f"provider={readiness.provider.value}",
+                f"flow={readiness.flow}",
+                f"entries={readiness.entry_count}",
+                f"checked={readiness.checked_count}/{readiness.total_count}",
+                "real_http=disabled",
             ]
         )
     )

@@ -162,6 +162,8 @@ Before collecting real captures, you can rehearse the local gates with the
 committed sanitized pack:
 
 ```powershell
+qr-live-scanner-tencent tencent-protocol-example-check
+
 qr-live-scanner-tencent tencent-protocol-artifact-check `
   --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json `
   --config examples/tencent-protocol-research-pack/qq-account-login.toml

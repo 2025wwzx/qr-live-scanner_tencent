@@ -13,6 +13,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "tencent-protocol-artifact-check" in readme
     assert "tencent-protocol-readiness" in readme
     assert "tencent-protocol-config-check" in readme
+    assert "tencent-protocol-example-check" in readme
     assert "examples/tencent-protocol-research-pack" in readme
     assert "rejects unsafe sample/config edits" in readme
     assert "rejects signed URLs or sensitive assignments" in readme
@@ -88,3 +89,8 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "sensitive assignments such as `ticket=` or `Cookie:`" in protocol_research
     assert "sensitive `app_id` values" in protocol_research
     assert "sensitive endpoint path segments" in protocol_research
+
+    example_readme = Path("examples/tencent-protocol-research-pack/README.md").read_text(
+        encoding="utf-8"
+    )
+    assert "tencent-protocol-example-check" in example_readme

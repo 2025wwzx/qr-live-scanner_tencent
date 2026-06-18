@@ -6,6 +6,8 @@ It does not contain raw HAR data, account identifiers, credential values, signed
 Run the local gates from the repository root:
 
 ```powershell
+qr-live-scanner-tencent tencent-protocol-example-check
+
 qr-live-scanner-tencent tencent-protocol-artifact-check `
   --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json `
   --config examples/tencent-protocol-research-pack/qq-account-login.toml
