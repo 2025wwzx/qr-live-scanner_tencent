@@ -144,6 +144,9 @@ qr-live-scanner-tencent tencent-login `
   --open-provider-page `
   --callback-url-file work/tencent-oauth-callback.txt `
   --secret-env-file .env.tencent
+
+Get-Clipboard | qr-live-scanner-tencent tencent-login-callback-write `
+  --callback-url-file work/tencent-oauth-callback.txt
 ```
 
 `tencent-login-config-init` is a local helper for the first real QR Connect
@@ -166,6 +169,12 @@ accepts only `QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET` and
 `QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET`, ignores other keys, does not
 overwrite already-set shell variables, and never prints file contents. `.env`
 and `.env.*` paths are already ignored by git.
+For manual callback-file handoff, run `tencent-login` first and keep it polling.
+After mobile approval, copy the provider redirect URL and pipe it to
+`tencent-login-callback-write` from a second terminal. The helper reads from
+stdin, validates that `code` and `state` are present, writes the ignored
+callback file, and does not print the redirect URL, OAuth code, state, or file
+path.
 
 The config loader rejects sensitive field names, sensitive `app_id` values,
 endpoint URLs with query strings or fragments, and sensitive endpoint path segments.

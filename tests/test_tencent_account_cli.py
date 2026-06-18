@@ -1,3 +1,5 @@
+import sys
+from io import StringIO
 from pathlib import Path
 
 import httpx
@@ -898,6 +900,116 @@ def test_tencent_login_readiness_rejects_invalid_secret_env_file_without_values(
     assert "invalid assignment" in output
     assert str(secret_env_path) not in output
     assert "QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET" not in output
+
+
+def test_tencent_login_callback_write_reads_stdin_without_echoing_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    callback_file = tmp_path / "oauth-callback.txt"
+    callback_url = "https://login.example.test/qq/callback?code=SECRET_CODE&state=SECRET_STATE"
+    monkeypatch.setattr(sys, "stdin", StringIO(f"{callback_url}\n"))
+
+    exit_code = _run_main(
+        [
+            "tencent-login-callback-write",
+            "--callback-url-file",
+            str(callback_file),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert callback_file.read_text(encoding="utf-8") == f"{callback_url}\n"
+    assert "Tencent account OAuth callback handoff written" in output
+    assert "callback_url_file=ready" in output
+    assert "SECRET_CODE" not in output
+    assert "SECRET_STATE" not in output
+    assert "login.example.test" not in output
+    assert str(callback_file) not in output
+
+
+def test_tencent_login_callback_write_rejects_existing_file_without_echoing_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    callback_file = tmp_path / "oauth-callback.txt"
+    callback_file.write_text("original\n", encoding="utf-8")
+    callback_url = "https://login.example.test/qq/callback?code=SECRET_CODE&state=SECRET_STATE"
+    monkeypatch.setattr(sys, "stdin", StringIO(f"{callback_url}\n"))
+
+    exit_code = _run_main(
+        [
+            "tencent-login-callback-write",
+            "--callback-url-file",
+            str(callback_file),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert callback_file.read_text(encoding="utf-8") == "original\n"
+    assert "output exists" in output
+    assert "SECRET_CODE" not in output
+    assert "SECRET_STATE" not in output
+    assert "login.example.test" not in output
+    assert str(callback_file) not in output
+
+
+def test_tencent_login_callback_write_rejects_invalid_stdin_without_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    callback_file = tmp_path / "oauth-callback.txt"
+    callback_url = "https://login.example.test/qq/callback?state=SECRET_STATE"
+    monkeypatch.setattr(sys, "stdin", StringIO(f"{callback_url}\n"))
+
+    exit_code = _run_main(
+        [
+            "tencent-login-callback-write",
+            "--callback-url-file",
+            str(callback_file),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert not callback_file.exists()
+    assert "callback handoff failed" in output
+    assert "SECRET_STATE" not in output
+    assert "login.example.test" not in output
+    assert str(callback_file) not in output
+
+
+def test_tencent_login_callback_write_force_overwrites_existing_file(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    callback_file = tmp_path / "oauth-callback.txt"
+    callback_file.write_text("original\n", encoding="utf-8")
+    callback_url = "https://login.example.test/qq/callback?code=SECRET_CODE&state=SECRET_STATE"
+    monkeypatch.setattr(sys, "stdin", StringIO(f"{callback_url}\n"))
+
+    exit_code = _run_main(
+        [
+            "tencent-login-callback-write",
+            "--callback-url-file",
+            str(callback_file),
+            "--force",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert callback_file.read_text(encoding="utf-8") == f"{callback_url}\n"
+    assert "callback_url_file=ready" in output
+    assert "SECRET_CODE" not in output
+    assert "SECRET_STATE" not in output
+    assert "login.example.test" not in output
 
 
 def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(

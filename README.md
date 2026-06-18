@@ -267,6 +267,7 @@ qr-live-scanner-tencent tencent-login-readiness --provider qq --protocol-config 
 qr-live-scanner-tencent tencent-protocol-config-check --provider qq --config .\profiles\tencent-account-login.toml
 qr-live-scanner-tencent tencent-login-preflight --provider qq --protocol-config .\profiles\tencent-account-login.toml --callback-url-file .\work\tencent-oauth-callback.txt --secret-env-file .\.env.tencent
 qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml --open-provider-page --callback-url-file .\work\tencent-oauth-callback.txt --secret-env-file .\.env.tencent
+Get-Clipboard | qr-live-scanner-tencent tencent-login-callback-write --callback-url-file .\work\tencent-oauth-callback.txt
 ```
 
 `tencent-login-config-init` writes only local OAuth metadata for QQ/WeChat QR
@@ -285,6 +286,11 @@ redirect URLs, callback URLs, secret values, OAuth codes, or token data.
 `QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET` are loaded from it; other keys are
 ignored, existing shell variables are not overwritten, and file contents are
 never printed.
+When using callback-file handoff, keep `tencent-login` running, approve the
+mobile QR login, copy the provider redirect URL, then run
+`tencent-login-callback-write` in another terminal. It reads the URL from stdin,
+validates that `code` and `state` exist, writes the ignored callback file, and
+does not echo the URL, code, state, or file path.
 
 ## License
 

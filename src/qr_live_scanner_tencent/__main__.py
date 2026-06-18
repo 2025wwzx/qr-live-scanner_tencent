@@ -139,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_login_config_init(args)
     if args.command == "tencent-login-readiness":
         return _run_tencent_login_readiness(args)
+    if args.command == "tencent-login-callback-write":
+        return _run_tencent_login_callback_write(args)
     if args.command == "tencent-login-preflight":
         return _run_tencent_login_preflight(args)
     if args.command == "tencent-list":
@@ -282,6 +284,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default="work/tencent-oauth-callback.txt",
     )
     tencent_login_readiness_parser.add_argument("--secret-env-file")
+
+    tencent_login_callback_write_parser = subparsers.add_parser(
+        "tencent-login-callback-write"
+    )
+    tencent_login_callback_write_parser.add_argument(
+        "--callback-url-file",
+        default="work/tencent-oauth-callback.txt",
+    )
+    tencent_login_callback_write_parser.add_argument("--force", action="store_true")
 
     tencent_login_preflight_parser = subparsers.add_parser("tencent-login-preflight")
     tencent_login_preflight_parser.add_argument(
@@ -1347,6 +1358,31 @@ def _run_tencent_login_readiness(args: argparse.Namespace) -> int:
     )
     print("next=tencent-login-preflight" if ready else "next=fix-readiness")
     return 0 if ready else 1
+
+
+def _run_tencent_login_callback_write(args: argparse.Namespace) -> int:
+    callback_url_file = Path(_required_text(args.callback_url_file, "callback URL file path"))
+    if callback_url_file.exists() and not bool(args.force):
+        print("[WARN] Tencent account OAuth callback handoff failed: output exists")
+        return 1
+    try:
+        callback_text = _first_nonempty_line(sys.stdin.read())
+        if not callback_text:
+            msg = "Tencent account OAuth callback input is required"
+            raise TencentAccountQRLoginError(msg)
+        _parse_tencent_oauth_callback_text(callback_text)
+        try:
+            callback_url_file.parent.mkdir(parents=True, exist_ok=True)
+            callback_url_file.write_text(f"{callback_text}\n", encoding="utf-8")
+        except OSError as exc:
+            msg = "Tencent account OAuth callback file could not be written"
+            raise TencentAccountQRLoginError(msg) from exc
+    except TencentAccountQRLoginError as exc:
+        print(f"[WARN] Tencent account OAuth callback handoff failed: {exc}")
+        return 2
+    print("Tencent account OAuth callback handoff written")
+    print("callback_url_file=ready")
+    return 0
 
 
 def _load_tencent_secret_env_file_if_requested(args: argparse.Namespace) -> None:

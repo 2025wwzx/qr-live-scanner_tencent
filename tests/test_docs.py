@@ -15,6 +15,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "tencent-protocol-config-check" in readme
     assert "tencent-login-config-init" in readme
     assert "tencent-login-readiness" in readme
+    assert "tencent-login-callback-write" in readme
     assert "--secret-env-file" in readme
     assert "tencent-protocol-example-check" in readme
     assert "tencent-protocol-next-steps" in readme
@@ -89,6 +90,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "tencent-protocol-config-check" in protocol_research
     assert "tencent-login-config-init" in protocol_research
     assert "tencent-login-readiness" in protocol_research
+    assert "tencent-login-callback-write" in protocol_research
     assert "--secret-env-file" in protocol_research
     assert "examples/tencent-protocol-research-pack" in protocol_research
     assert "tencent-protocol-next-steps" in protocol_research
