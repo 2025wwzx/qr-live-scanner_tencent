@@ -263,6 +263,7 @@ it in memory, accepts the callback, and then attempts to delete the file.
 
 ```powershell
 qr-live-scanner-tencent tencent-login-config-init --provider qq --app-id <your-app-id> --redirect-uri https://your-public-callback.example/qq/callback --output .\profiles\tencent-account-login.toml
+qr-live-scanner-tencent tencent-login-readiness --provider qq --protocol-config .\profiles\tencent-account-login.toml --callback-url-file .\work\tencent-oauth-callback.txt
 qr-live-scanner-tencent tencent-protocol-config-check --provider qq --config .\profiles\tencent-account-login.toml
 qr-live-scanner-tencent tencent-login-preflight --provider qq --protocol-config .\profiles\tencent-account-login.toml --callback-url-file .\work\tencent-oauth-callback.txt
 qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml --open-provider-page --callback-url-file .\work\tencent-oauth-callback.txt
@@ -275,6 +276,10 @@ app ID or redirect URL. The default mode is file handoff, so the generated TOML
 omits `callback_bind_url`; use `--callback-mode local-bind --callback-bind-url
 http://127.0.0.1:<port>/<path>` only when the public redirect can forward to a
 local listener.
+`tencent-login-readiness` is a no-HTTP checklist for real login testing. It
+reports only safe status fields such as config presence, protocol mode, secret
+environment presence, callback mode, and readiness; it does not echo app IDs,
+redirect URLs, callback URLs, secret values, OAuth codes, or token data.
 
 ## License
 

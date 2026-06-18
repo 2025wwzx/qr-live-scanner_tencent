@@ -122,6 +122,11 @@ qr-live-scanner-tencent tencent-login-config-init `
   --redirect-uri https://your-public-callback.example/qq/callback `
   --output profiles/tencent-account-login.toml
 
+qr-live-scanner-tencent tencent-login-readiness `
+  --provider qq `
+  --protocol-config profiles/tencent-account-login.toml `
+  --callback-url-file work/tencent-oauth-callback.txt
+
 qr-live-scanner-tencent tencent-protocol-config-check `
   --provider qq `
   --config profiles/tencent-account-login.toml
@@ -147,6 +152,11 @@ value. By default it prepares file-handoff mode and omits `callback_bind_url`;
 use `--callback-mode local-bind --callback-bind-url
 http://127.0.0.1:<port>/<path>` only when the public redirect can forward to a
 local listener.
+`tencent-login-readiness` can be run before preflight to see which local setup
+piece is still missing. It reports only safe state labels: config present or
+missing, protocol mode, secret environment presence, callback mode, and final
+readiness. It does not echo app IDs, redirect URIs, callback URLs, secret
+values, OAuth codes, token data, openid/unionid, Cookie, or QR payload.
 
 The config loader rejects sensitive field names, sensitive `app_id` values,
 endpoint URLs with query strings or fragments, and sensitive endpoint path segments.

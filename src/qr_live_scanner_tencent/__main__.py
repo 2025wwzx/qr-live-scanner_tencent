@@ -131,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_login(args)
     if args.command == "tencent-login-config-init":
         return _run_tencent_login_config_init(args)
+    if args.command == "tencent-login-readiness":
+        return _run_tencent_login_readiness(args)
     if args.command == "tencent-login-preflight":
         return _run_tencent_login_preflight(args)
     if args.command == "tencent-list":
@@ -257,6 +259,21 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     tencent_login_config_init_parser.add_argument("--callback-bind-url")
     tencent_login_config_init_parser.add_argument("--force", action="store_true")
+
+    tencent_login_readiness_parser = subparsers.add_parser("tencent-login-readiness")
+    tencent_login_readiness_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+    tencent_login_readiness_parser.add_argument(
+        "--protocol-config",
+        default="profiles/tencent-account-login.toml",
+    )
+    tencent_login_readiness_parser.add_argument(
+        "--callback-url-file",
+        default="work/tencent-oauth-callback.txt",
+    )
 
     tencent_login_preflight_parser = subparsers.add_parser("tencent-login-preflight")
     tencent_login_preflight_parser.add_argument(
@@ -1246,6 +1263,88 @@ def _run_tencent_login_config_init(args: argparse.Namespace) -> int:
         "real_http=not-called"
     )
     return 0
+
+
+def _run_tencent_login_readiness(args: argparse.Namespace) -> int:
+    provider = TencentLoginProvider(str(args.provider))
+    config_path = Path(_required_text(args.protocol_config, "protocol config path"))
+    callback_url_file = Path(_required_text(args.callback_url_file, "callback URL file path"))
+    if not config_path.exists():
+        print("Tencent account login readiness: not ready")
+        print(
+            f"provider={provider.value} "
+            "config=missing "
+            "secret_env=not-checked "
+            "callback=not-checked "
+            "real_http=not-called "
+            "ready=no"
+        )
+        print("next=tencent-login-config-init")
+        return 1
+    try:
+        config = load_tencent_account_qr_login_config(
+            config_path,
+            provider,
+            require_callback_bind_url=False,
+        )
+        secret_state = _tencent_login_readiness_secret_state(config)
+        callback_state = _tencent_login_readiness_callback_state(
+            config,
+            callback_url_file=callback_url_file,
+        )
+    except (OSError, ValueError, QRLiveScannerError, TencentAccountQRLoginError) as exc:
+        print("Tencent account login readiness: invalid")
+        print(
+            f"provider={provider.value} "
+            "config=invalid "
+            "secret_env=not-checked "
+            "callback=not-checked "
+            "real_http=not-called "
+            "ready=no"
+        )
+        print(f"[WARN] Tencent account login readiness failed: {exc}")
+        return 2
+
+    ready = secret_state in {"present", "not-required"} and callback_state in {
+        "file-handoff",
+        "local-bind-available",
+        "not-required",
+    }
+    print(f"Tencent account login readiness: {'ready' if ready else 'not ready'}")
+    print(
+        f"provider={provider.value} "
+        f"config=present "
+        f"protocol_mode={config.protocol_mode.value} "
+        f"secret_env={secret_state} "
+        f"callback={callback_state} "
+        "real_http=not-called "
+        f"ready={_yes_no(ready)}"
+    )
+    print("next=tencent-login-preflight" if ready else "next=fix-readiness")
+    return 0 if ready else 1
+
+
+def _tencent_login_readiness_secret_state(config: TencentAccountQRLoginConfig) -> str:
+    env_name = _tencent_login_secret_env_name(config.protocol_mode)
+    if env_name is None:
+        return "not-required"
+    return "present" if _optional_text(os.environ.get(env_name)) else f"missing:{env_name}"
+
+
+def _tencent_login_readiness_callback_state(
+    config: TencentAccountQRLoginConfig,
+    *,
+    callback_url_file: Path,
+) -> str:
+    if not config.callback_bind_url:
+        if not str(callback_url_file).strip():
+            return "file-handoff-missing"
+        return "file-handoff"
+    try:
+        state = _check_tencent_login_preflight_callback_bind(config)
+    except TencentAccountQRLoginError:
+        return "local-bind-unavailable"
+    return "local-bind-available" if state == "available" else state
 
 
 def _render_tencent_login_config_init(
