@@ -43,6 +43,9 @@ ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS = frozenset(
         "uid",
     }
 )
+ACCOUNT_QR_LOGIN_SENSITIVE_VALUE_FRAGMENTS = frozenset(
+    ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS | {"authorization", "qrsig", "scan_token"}
+)
 
 
 class TencentAccountQRLoginState(StrEnum):
@@ -129,10 +132,7 @@ def load_tencent_account_qr_login_config(
     return base_config.validated(
         fetch_url=_require_endpoint_url(provider_section.get("fetch_url")),
         query_url=_require_endpoint_url(provider_section.get("query_url")),
-        app_id=_require_text(
-            provider_section.get("app_id"),
-            "Tencent account QR app id is required",
-        ),
+        app_id=_require_app_id(provider_section.get("app_id")),
     )
 
 
@@ -492,6 +492,21 @@ def _require_endpoint_url(value: object) -> str:
         msg = "Tencent account QR endpoint URL must not include signed endpoint data"
         raise TencentAccountQRLoginError(msg)
     return endpoint_url
+
+
+def _require_app_id(value: object) -> str:
+    app_id = _require_text(value, "Tencent account QR app id is required")
+    if "\r" in app_id or "\n" in app_id:
+        msg = "Tencent account QR app id is invalid"
+        raise TencentAccountQRLoginError(msg)
+    lowered = app_id.lower()
+    if "://" in lowered or "?" in app_id or "#" in app_id:
+        msg = "Tencent account QR app id must not include signed endpoint data"
+        raise TencentAccountQRLoginError(msg)
+    if any(fragment in lowered for fragment in ACCOUNT_QR_LOGIN_SENSITIVE_VALUE_FRAGMENTS):
+        msg = "Tencent account QR app id must not include credential data"
+        raise TencentAccountQRLoginError(msg)
+    return app_id
 
 
 def _endpoint_path_contains_sensitive_data(path: str) -> bool:

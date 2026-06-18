@@ -119,6 +119,30 @@ def test_load_tencent_account_qr_login_config_rejects_sensitive_path_segments_wi
     assert secret not in str(exc_info.value)
 
 
+def test_load_tencent_account_qr_login_config_rejects_sensitive_app_id_without_echo(
+    tmp_path: Path,
+) -> None:
+    secret = "SECRET_TOKEN_VALUE_DO_NOT_LEAK"
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'fetch_url = "https://example.test/qq/fetch"',
+                'query_url = "https://example.test/qq/query"',
+                f'app_id = "{secret}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TencentAccountQRLoginError, match="app id") as exc_info:
+        load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
+
+    assert secret not in str(exc_info.value)
+
+
 @pytest.mark.asyncio
 async def test_tencent_account_qr_login_rejects_unvalidated_config_before_http() -> None:
     called = False

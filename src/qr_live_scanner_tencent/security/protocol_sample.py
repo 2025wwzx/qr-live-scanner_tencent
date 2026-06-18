@@ -10,6 +10,7 @@ from qr_live_scanner_tencent.accounts.tencent_qr_login import (
     ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS,
     ACCOUNT_QR_LOGIN_CONFIG_SECTION,
     ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS,
+    ACCOUNT_QR_LOGIN_SENSITIVE_VALUE_FRAGMENTS,
 )
 from qr_live_scanner_tencent.interfaces import TencentLoginProvider
 from qr_live_scanner_tencent.security.har import (
@@ -419,9 +420,8 @@ def _validate_account_qr_config_provider_artifact(provider_section: dict[str, An
         raise ValueError("protocol config validated_protocol must remain false")
     _validate_artifact_endpoint_url(provider_section.get("fetch_url"))
     _validate_artifact_endpoint_url(provider_section.get("query_url"))
-    _validate_artifact_token(
+    _validate_artifact_app_id(
         _required_text(provider_section.get("app_id"), "protocol config app id is required"),
-        "protocol config app id",
     )
 
 
@@ -456,6 +456,15 @@ def _validate_artifact_name_list(value: object, label: str) -> None:
         raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
     for item in value:
         _validate_artifact_token(_required_text(item, label), label)
+
+
+def _validate_artifact_app_id(value: str) -> None:
+    _validate_artifact_token(value, "protocol config app id")
+    lowered = value.lower()
+    if "://" in lowered or "?" in value or "#" in value:
+        raise ValueError("protocol config app id must not include credential data")
+    if any(fragment in lowered for fragment in ACCOUNT_QR_LOGIN_SENSITIVE_VALUE_FRAGMENTS):
+        raise ValueError("protocol config app id must not include credential data")
 
 
 def _validate_artifact_optional_token(value: object, label: str) -> None:

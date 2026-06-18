@@ -70,6 +70,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     provide_real_values = Path("docs/provide-real-values.md").read_text(encoding="utf-8")
     assert "tencent-protocol-artifact-check" in provide_real_values
     assert "tencent-protocol-readiness" in provide_real_values
+    assert "sensitive `app_id`" in provide_real_values
     assert "`validated_protocol = true`" in provide_real_values
 
     protocol_research = Path("docs/tencent-protocol-research.md").read_text(
@@ -79,4 +80,5 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "tencent-protocol-readiness" in protocol_research
     assert "`real_http=disabled`" in protocol_research
     assert "sensitive assignments such as `ticket=` or `Cookie:`" in protocol_research
+    assert "sensitive `app_id` values" in protocol_research
     assert "sensitive endpoint path segments" in protocol_research

@@ -845,6 +845,45 @@ def test_protocol_artifact_check_cli_rejects_raw_sample_values_without_echoing_v
     assert secret not in output
 
 
+def test_protocol_artifact_check_cli_rejects_sensitive_app_id_without_echoing_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "SECRET_TOKEN_VALUE_DO_NOT_LEAK"
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    _write_safe_protocol_sample(sample_path)
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = false",
+                'fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow"',
+                'query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"',
+                f'app_id = "{secret}"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-artifact-check",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol artifact check failed" in output
+    assert "app id" in output.lower()
+    assert secret not in output
+
+
 def test_protocol_readiness_cli_blocks_unchecked_validation_note(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
