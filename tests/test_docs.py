@@ -44,6 +44,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "qr-live-scanner-tencent gui-snapshot" in readme
     assert "gui-snapshot --provider wechat --mock-uid" in readme
     assert "work/gui-snapshots" in readme
+    assert "main-window-account-status.png" in readme
     assert "tencent-account-import-dialog" in readme
     assert "tencent-account-smoke-dialog" in readme
     assert "完整本地账号保留测试" in readme

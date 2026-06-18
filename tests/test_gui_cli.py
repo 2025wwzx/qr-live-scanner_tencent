@@ -87,6 +87,7 @@ def test_gui_snapshot_cli_can_render_mock_account_state(
 
     assert exit_code == 0
     assert (output_dir / "main-window.png").read_bytes().startswith(b"\x89PNG")
+    assert (output_dir / "main-window-account-status.png").read_bytes().startswith(b"\x89PNG")
     assert (output_dir / "tencent-account-dialog-wechat.png").read_bytes().startswith(b"\x89PNG")
     assert (output_dir / "tencent-account-import-dialog-wechat.png").read_bytes().startswith(
         b"\x89PNG"
@@ -95,6 +96,7 @@ def test_gui_snapshot_cli_can_render_mock_account_state(
         b"\x89PNG"
     )
     assert (output_dir / "tencent-account-dialog-wechat-qr.png").read_bytes().startswith(b"\x89PNG")
+    assert str(output_dir / "main-window-account-status.png") in output
     assert "mock account snapshot rendered" in output
     assert "local-wechat-user" not in output
     assert "local-mock-only" not in output

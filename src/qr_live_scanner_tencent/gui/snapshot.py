@@ -94,6 +94,11 @@ def write_gui_snapshots(
         target_dir / f"tencent-account-smoke-dialog-{normalized_provider.value}.png",
     ]
     _save_widget_png(main_window, paths[0], minimum_size=QSize(720, 820))
+    if normalized_mock_uid:
+        account_status_path = target_dir / "main-window-account-status.png"
+        main_window._check_selected_account_status()
+        _save_widget_png(main_window, account_status_path, minimum_size=QSize(720, 820))
+        paths.append(account_status_path)
     _save_widget_png(account_dialog, paths[1], minimum_size=QSize(360, 460))
     _save_widget_png(import_dialog, paths[2], minimum_size=QSize(360, 220))
     _save_widget_png(smoke_dialog, paths[3], minimum_size=QSize(360, 220))
