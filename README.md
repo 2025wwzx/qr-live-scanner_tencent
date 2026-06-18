@@ -38,6 +38,8 @@ python -m mypy
 腾讯真实扫码协议必须先通过脱敏资料验证，验证项见
 `docs/tencent-protocol-research.md`。原始 HAR、Cookie、token 和二维码 payload
 不得提交到 git，也不要粘贴到聊天或 issue 中。
+`tencent-protocol-preflight` 会检查 `.gitignore` 和 Git 实际忽略结果，确认
+`captures/` 与 `profiles/` 下的敏感采样/配置路径不会被提交。
 
 ## Tencent Account QR Login
 

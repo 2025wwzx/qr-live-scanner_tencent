@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -279,6 +280,7 @@ def test_protocol_preflight_cli_verifies_sensitive_paths_are_ignored(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    _init_git_repo(tmp_path)
     (tmp_path / ".gitignore").write_text("captures/\nprofiles/\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
@@ -299,6 +301,7 @@ def test_protocol_preflight_cli_fails_when_sensitive_paths_are_not_ignored(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    _init_git_repo(tmp_path)
     (tmp_path / ".gitignore").write_text("work/\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
@@ -310,6 +313,30 @@ def test_protocol_preflight_cli_fails_when_sensitive_paths_are_not_ignored(
     assert "captures/" in output
     assert "profiles/" in output
     assert "SECRET_VALUE_DO_NOT_LEAK" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket=" not in output.lower()
+
+
+def test_protocol_preflight_cli_fails_when_git_ignore_is_negated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(
+        "captures/\n!captures/\nprofiles/\n!profiles/\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = _run_main(["tencent-protocol-preflight"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol preflight failed" in output
+    assert "captures/tencent-login.har" in output
+    assert "profiles/tencent-account-login.toml" in output
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()
     assert "ticket=" not in output.lower()
@@ -601,3 +628,7 @@ def _run_main(argv: list[str]) -> int:
         if isinstance(exc.code, int):
             return exc.code
         return 1
+
+
+def _init_git_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "--quiet"], cwd=path, check=True)

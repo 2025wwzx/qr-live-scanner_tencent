@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -659,6 +660,14 @@ def _run_tencent_protocol_preflight(_args: argparse.Namespace) -> int:
             print(f"- {rule}")
         return 2
 
+    sensitive_paths = ("captures/tencent-login.har", "profiles/tencent-account-login.toml")
+    unignored_paths = _git_unignored_paths(sensitive_paths)
+    if unignored_paths:
+        print("Tencent protocol preflight failed: sensitive paths are not ignored by git")
+        for path in unignored_paths:
+            print(f"- {path}")
+        return 2
+
     print("Tencent protocol preflight passed")
     print("captures/ ignored")
     print("profiles/ ignored")
@@ -673,6 +682,20 @@ def _gitignore_rules(gitignore_text: str) -> set[str]:
             continue
         rules.add(normalized)
     return rules
+
+
+def _git_unignored_paths(paths: tuple[str, ...]) -> list[str]:
+    unignored_paths: list[str] = []
+    for path in paths:
+        result = subprocess.run(
+            ["git", "check-ignore", "--quiet", path],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode != 0:
+            unignored_paths.append(path)
+    return unignored_paths
 
 
 def _validate_har_shape(har: dict[str, object]) -> None:

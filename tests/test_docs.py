@@ -7,6 +7,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "GUI 本地 mock 账号测试" in readme
     assert "qr-live-scanner-tencent gui --dry-run" in readme
     assert "tencent-protocol-preflight" in readme
+    assert "Git 实际忽略结果" in readme
     assert "tencent-protocol-guide --provider qq" in readme
     assert "账号管理" in readme
     assert "新增账号" in readme
