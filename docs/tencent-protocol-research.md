@@ -116,6 +116,12 @@ or git.
 Use it only with clean endpoint URLs:
 
 ```powershell
+qr-live-scanner-tencent tencent-login-config-init `
+  --provider qq `
+  --app-id <your-app-id> `
+  --redirect-uri https://your-public-callback.example/qq/callback `
+  --output profiles/tencent-account-login.toml
+
 qr-live-scanner-tencent tencent-protocol-config-check `
   --provider qq `
   --config profiles/tencent-account-login.toml
@@ -131,6 +137,16 @@ qr-live-scanner-tencent tencent-login `
   --open-provider-page `
   --callback-url-file work/tencent-oauth-callback.txt
 ```
+
+`tencent-login-config-init` is a local helper for the first real QR Connect
+test. It writes `validated_protocol = true`, the provider OAuth endpoints, the
+app ID, and the public redirect URI, but never writes app secrets, OAuth codes,
+tokens, openid/unionid, Cookie, QR payload, or signed URLs. Its console output
+does not echo the app ID, redirect URI, callback URL, or secret environment
+value. By default it prepares file-handoff mode and omits `callback_bind_url`;
+use `--callback-mode local-bind --callback-bind-url
+http://127.0.0.1:<port>/<path>` only when the public redirect can forward to a
+local listener.
 
 The config loader rejects sensitive field names, sensitive `app_id` values,
 endpoint URLs with query strings or fragments, and sensitive endpoint path segments.

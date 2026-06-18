@@ -5,9 +5,13 @@ import pytest
 
 import qr_live_scanner_tencent.__main__ as main_module
 from qr_live_scanner_tencent.__main__ import main
-from qr_live_scanner_tencent.accounts import TencentSession
+from qr_live_scanner_tencent.accounts import (
+    TencentSession,
+    load_tencent_account_qr_login_config,
+)
 from qr_live_scanner_tencent.accounts.tencent_qr_login import (
     TencentAccountQRLoginError,
+    TencentAccountQRLoginProtocolMode,
     TencentAccountQRLoginState,
     TencentAccountQRLoginStatus,
     TencentAccountQRTicket,
@@ -342,6 +346,222 @@ def test_tencent_login_preflight_accepts_callback_file_handoff_without_bind(
     assert "login.example.test" not in output
     assert "verified-qq-app" not in output
     assert str(callback_file) not in output
+
+
+def test_tencent_login_config_init_writes_qq_file_handoff_without_echoing_values(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "tencent-account-login.toml"
+    app_id = "verified-qq-connect-app"
+    redirect_uri = "https://login.example.test/oauth/qq/callback"
+
+    exit_code = _run_main(
+        [
+            "tencent-login-config-init",
+            "--provider",
+            "qq",
+            "--app-id",
+            app_id,
+            "--redirect-uri",
+            redirect_uri,
+            "--output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+    config_text = output_path.read_text(encoding="utf-8")
+    config = load_tencent_account_qr_login_config(
+        output_path,
+        TencentLoginProvider.QQ,
+        require_callback_bind_url=False,
+    )
+
+    assert exit_code == 0
+    assert config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT
+    assert config.app_id == app_id
+    assert config.redirect_uri == redirect_uri
+    assert "callback_bind_url" not in config_text
+    assert 'fetch_url = "https://graph.qq.com/oauth2.0/authorize"' in config_text
+    assert 'query_url = "https://graph.qq.com/oauth2.0/token"' in config_text
+    assert "Tencent account login config initialized" in output
+    assert "provider=qq" in output
+    assert "callback_mode=file-handoff" in output
+    assert "real_http=not-called" in output
+    assert app_id not in output
+    assert "login.example.test" not in output
+    assert redirect_uri not in output
+
+
+def test_tencent_login_config_init_writes_wechat_local_bind_without_echoing_values(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    unused_tcp_port: int,
+) -> None:
+    output_path = tmp_path / "tencent-account-login.toml"
+    app_id = "verified-wechat-connect-app"
+    redirect_uri = "https://login.example.test/oauth/wechat/callback"
+    callback_bind_url = f"http://127.0.0.1:{unused_tcp_port}/wechat/callback"
+
+    exit_code = _run_main(
+        [
+            "tencent-login-config-init",
+            "--provider",
+            "wechat",
+            "--app-id",
+            app_id,
+            "--redirect-uri",
+            redirect_uri,
+            "--callback-mode",
+            "local-bind",
+            "--callback-bind-url",
+            callback_bind_url,
+            "--output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+    config_text = output_path.read_text(encoding="utf-8")
+    config = load_tencent_account_qr_login_config(
+        output_path,
+        TencentLoginProvider.WECHAT,
+    )
+
+    assert exit_code == 0
+    assert config.protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT
+    assert config.app_id == app_id
+    assert config.redirect_uri == redirect_uri
+    assert config.callback_bind_url == callback_bind_url
+    assert 'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"' in config_text
+    assert 'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"' in config_text
+    assert f'callback_bind_url = "{callback_bind_url}"' in config_text
+    assert "provider=wechat" in output
+    assert "callback_mode=local-bind" in output
+    assert app_id not in output
+    assert "login.example.test" not in output
+    assert callback_bind_url not in output
+    assert str(unused_tcp_port) not in output
+
+
+def test_tencent_login_config_init_rejects_overwrite_without_force(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "tencent-account-login.toml"
+    output_path.write_text("original\n", encoding="utf-8")
+
+    exit_code = _run_main(
+        [
+            "tencent-login-config-init",
+            "--provider",
+            "qq",
+            "--app-id",
+            "verified-qq-connect-app",
+            "--redirect-uri",
+            "https://login.example.test/oauth/qq/callback",
+            "--output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert output_path.read_text(encoding="utf-8") == "original\n"
+    assert "output exists" in output
+    assert "verified-qq-connect-app" not in output
+    assert "login.example.test" not in output
+
+
+def test_tencent_login_config_init_force_overwrites_existing_file(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "tencent-account-login.toml"
+    output_path.write_text("original\n", encoding="utf-8")
+
+    exit_code = _run_main(
+        [
+            "tencent-login-config-init",
+            "--provider",
+            "qq",
+            "--app-id",
+            "verified-qq-connect-app",
+            "--redirect-uri",
+            "https://login.example.test/oauth/qq/callback",
+            "--output",
+            str(output_path),
+            "--force",
+        ]
+    )
+    output = capsys.readouterr().out
+    config_text = output_path.read_text(encoding="utf-8")
+
+    assert exit_code == 0
+    assert "original" not in config_text
+    assert 'protocol_mode = "qq_qrconnect"' in config_text
+    assert "Tencent account login config initialized" in output
+
+
+def test_tencent_login_config_init_rejects_local_bind_without_callback_url(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "tencent-account-login.toml"
+
+    exit_code = _run_main(
+        [
+            "tencent-login-config-init",
+            "--provider",
+            "wechat",
+            "--app-id",
+            "verified-wechat-connect-app",
+            "--redirect-uri",
+            "https://login.example.test/oauth/wechat/callback",
+            "--callback-mode",
+            "local-bind",
+            "--output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert not output_path.exists()
+    assert "callback bind URL is required" in output
+    assert "verified-wechat-connect-app" not in output
+    assert "login.example.test" not in output
+
+
+def test_tencent_login_config_init_rejects_callback_bind_url_in_file_handoff(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    unused_tcp_port: int,
+) -> None:
+    output_path = tmp_path / "tencent-account-login.toml"
+    callback_bind_url = f"http://127.0.0.1:{unused_tcp_port}/qq/callback"
+
+    exit_code = _run_main(
+        [
+            "tencent-login-config-init",
+            "--provider",
+            "qq",
+            "--app-id",
+            "verified-qq-connect-app",
+            "--redirect-uri",
+            "https://login.example.test/oauth/qq/callback",
+            "--callback-bind-url",
+            callback_bind_url,
+            "--output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert not output_path.exists()
+    assert "callback bind URL is only accepted" in output
+    assert callback_bind_url not in output
+    assert str(unused_tcp_port) not in output
 
 
 def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(

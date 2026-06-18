@@ -71,6 +71,11 @@ TENCENT_PROTOCOL_EXAMPLE_PACK_DIR = Path("examples/tencent-protocol-research-pac
 TENCENT_PROTOCOL_EXAMPLE_SAMPLE = "qq-account-login.sample.json"
 TENCENT_PROTOCOL_EXAMPLE_CONFIG = "qq-account-login.toml"
 TENCENT_PROTOCOL_EXAMPLE_NOTE = "qq-account-login.note.md"
+TENCENT_LOGIN_CONFIG_INIT_CALLBACK_MODES = ("file-handoff", "local-bind")
+TENCENT_QQ_QRCONNECT_FETCH_URL = "https://graph.qq.com/oauth2.0/authorize"
+TENCENT_QQ_QRCONNECT_QUERY_URL = "https://graph.qq.com/oauth2.0/token"
+TENCENT_WECHAT_QRCONNECT_FETCH_URL = "https://open.weixin.qq.com/connect/qrconnect"
+TENCENT_WECHAT_QRCONNECT_QUERY_URL = "https://api.weixin.qq.com/sns/oauth2/access_token"
 
 
 class TencentAccountQRLoginServiceProtocol(Protocol):
@@ -124,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_gui_snapshot(args)
     if args.command == "tencent-login":
         return _run_tencent_login(args)
+    if args.command == "tencent-login-config-init":
+        return _run_tencent_login_config_init(args)
     if args.command == "tencent-login-preflight":
         return _run_tencent_login_preflight(args)
     if args.command == "tencent-list":
@@ -230,6 +237,26 @@ def _build_parser() -> argparse.ArgumentParser:
     tencent_login_parser.add_argument("--protocol-config")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
+
+    tencent_login_config_init_parser = subparsers.add_parser("tencent-login-config-init")
+    tencent_login_config_init_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+    tencent_login_config_init_parser.add_argument("--app-id", required=True)
+    tencent_login_config_init_parser.add_argument("--redirect-uri", required=True)
+    tencent_login_config_init_parser.add_argument(
+        "--output",
+        default="profiles/tencent-account-login.toml",
+    )
+    tencent_login_config_init_parser.add_argument(
+        "--callback-mode",
+        choices=TENCENT_LOGIN_CONFIG_INIT_CALLBACK_MODES,
+        default="file-handoff",
+    )
+    tencent_login_config_init_parser.add_argument("--callback-bind-url")
+    tencent_login_config_init_parser.add_argument("--force", action="store_true")
 
     tencent_login_preflight_parser = subparsers.add_parser("tencent-login-preflight")
     tencent_login_preflight_parser.add_argument(
@@ -1184,6 +1211,114 @@ def _run_tencent_login_preflight(args: argparse.Namespace) -> int:
         "real_http=not-called"
     )
     return 0
+
+
+def _run_tencent_login_config_init(args: argparse.Namespace) -> int:
+    provider = TencentLoginProvider(str(args.provider))
+    callback_mode = str(args.callback_mode)
+    output_path = Path(_required_text(args.output, "config output path"))
+    if output_path.exists() and not bool(args.force):
+        print(f"[WARN] Tencent account login config init failed: output exists: {output_path}")
+        return 1
+    try:
+        config_text = _render_tencent_login_config_init(
+            provider=provider,
+            app_id=_required_text(args.app_id, "app id"),
+            redirect_uri=_required_text(args.redirect_uri, "redirect URI"),
+            callback_mode=callback_mode,
+            callback_bind_url=_optional_text(args.callback_bind_url),
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(config_text, encoding="utf-8")
+        load_tencent_account_qr_login_config(
+            output_path,
+            provider,
+            require_callback_bind_url=callback_mode == "local-bind",
+        )
+    except (OSError, ValueError, QRLiveScannerError, TencentAccountQRLoginError) as exc:
+        print(f"[WARN] Tencent account login config init failed: {exc}")
+        return 2
+    print("Tencent account login config initialized")
+    print(
+        f"provider={provider.value} "
+        f"callback_mode={callback_mode} "
+        f"output={output_path} "
+        "real_http=not-called"
+    )
+    return 0
+
+
+def _render_tencent_login_config_init(
+    *,
+    provider: TencentLoginProvider,
+    app_id: str,
+    redirect_uri: str,
+    callback_mode: str,
+    callback_bind_url: str | None,
+) -> str:
+    if callback_mode not in TENCENT_LOGIN_CONFIG_INIT_CALLBACK_MODES:
+        msg = "callback mode is unsupported"
+        raise ValueError(msg)
+    if callback_mode == "local-bind":
+        normalized_callback_bind_url = _required_text(
+            callback_bind_url,
+            "callback bind URL is required for local-bind mode",
+        )
+    else:
+        if callback_bind_url is not None:
+            msg = "callback bind URL is only accepted in local-bind mode"
+            raise ValueError(msg)
+        normalized_callback_bind_url = ""
+
+    protocol_mode, fetch_url, query_url = _tencent_login_config_init_mode(provider)
+    config = TencentAccountQRLoginService.default_configs()[provider].validated(
+        fetch_url=fetch_url,
+        query_url=query_url,
+        app_id=app_id,
+        protocol_mode=protocol_mode,
+        redirect_uri=redirect_uri,
+        callback_bind_url=normalized_callback_bind_url or None,
+    )
+    lines = [
+        f"[account_qr_login.{provider.value}]",
+        "validated_protocol = true",
+        f'protocol_mode = "{config.protocol_mode.value}"',
+        f'fetch_url = "{_toml_string(fetch_url)}"',
+        f'query_url = "{_toml_string(query_url)}"',
+        f'redirect_uri = "{_toml_string(config.redirect_uri)}"',
+    ]
+    if callback_mode == "local-bind":
+        lines.append(f'callback_bind_url = "{_toml_string(config.callback_bind_url)}"')
+    lines.extend(
+        [
+            f'app_id = "{_toml_string(config.app_id)}"',
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _tencent_login_config_init_mode(
+    provider: TencentLoginProvider,
+) -> tuple[TencentAccountQRLoginProtocolMode, str, str]:
+    if provider is TencentLoginProvider.QQ:
+        return (
+            TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+            TENCENT_QQ_QRCONNECT_FETCH_URL,
+            TENCENT_QQ_QRCONNECT_QUERY_URL,
+        )
+    if provider is TencentLoginProvider.WECHAT:
+        return (
+            TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+            TENCENT_WECHAT_QRCONNECT_FETCH_URL,
+            TENCENT_WECHAT_QRCONNECT_QUERY_URL,
+        )
+    msg = "Tencent login provider is unsupported"
+    raise ValueError(msg)
+
+
+def _toml_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _run_tencent_login_mock_confirm(

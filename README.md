@@ -262,10 +262,19 @@ temporary OAuth code/state data, so do not commit or share it. The command reads
 it in memory, accepts the callback, and then attempts to delete the file.
 
 ```powershell
+qr-live-scanner-tencent tencent-login-config-init --provider qq --app-id <your-app-id> --redirect-uri https://your-public-callback.example/qq/callback --output .\profiles\tencent-account-login.toml
 qr-live-scanner-tencent tencent-protocol-config-check --provider qq --config .\profiles\tencent-account-login.toml
 qr-live-scanner-tencent tencent-login-preflight --provider qq --protocol-config .\profiles\tencent-account-login.toml --callback-url-file .\work\tencent-oauth-callback.txt
 qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml --open-provider-page --callback-url-file .\work\tencent-oauth-callback.txt
 ```
+
+`tencent-login-config-init` writes only local OAuth metadata for QQ/WeChat QR
+Connect. It does not write app secrets, OAuth codes, tokens, openid/unionid,
+Cookie, QR payload, or signed URLs, and its console output does not echo the
+app ID or redirect URL. The default mode is file handoff, so the generated TOML
+omits `callback_bind_url`; use `--callback-mode local-bind --callback-bind-url
+http://127.0.0.1:<port>/<path>` only when the public redirect can forward to a
+local listener.
 
 ## License
 
