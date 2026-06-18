@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import time
+import tomllib
 from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
@@ -39,6 +40,7 @@ from qr_live_scanner_tencent.interfaces import (
 )
 from qr_live_scanner_tencent.security import (
     build_tencent_protocol_sample_from_har,
+    check_tencent_protocol_artifacts,
     redact_har,
     render_tencent_account_qr_config_skeleton,
     render_tencent_protocol_note,
@@ -88,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_protocol_note(args)
     if args.command == "tencent-protocol-config-skeleton":
         return _run_tencent_protocol_config_skeleton(args)
+    if args.command == "tencent-protocol-artifact-check":
+        return _run_tencent_protocol_artifact_check(args)
     if args.command == "tencent-protocol-guide":
         return _run_tencent_protocol_guide(args)
     if args.command == "tencent-protocol-preflight":
@@ -264,6 +268,10 @@ def _build_parser() -> argparse.ArgumentParser:
     protocol_config_parser = subparsers.add_parser("tencent-protocol-config-skeleton")
     protocol_config_parser.add_argument("--input", required=True)
     protocol_config_parser.add_argument("--output", required=True)
+
+    protocol_artifact_check_parser = subparsers.add_parser("tencent-protocol-artifact-check")
+    protocol_artifact_check_parser.add_argument("--sample", required=True)
+    protocol_artifact_check_parser.add_argument("--config", required=True)
 
     protocol_guide_parser = subparsers.add_parser("tencent-protocol-guide")
     protocol_guide_parser.add_argument(
@@ -607,6 +615,47 @@ def _run_tencent_protocol_config_skeleton(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_tencent_protocol_artifact_check(args: argparse.Namespace) -> int:
+    sample_path = Path(str(args.sample))
+    config_path = Path(str(args.config))
+    try:
+        with sample_path.open("r", encoding="utf-8-sig") as file:
+            sample = json.load(file)
+        if not isinstance(sample, dict):
+            msg = "protocol sample root must be a JSON object"
+            raise ValueError(msg)
+        with config_path.open("rb") as file:
+            config = tomllib.load(file)
+        result = check_tencent_protocol_artifacts(sample, config)
+    except OSError:
+        print("[WARN] Tencent protocol artifact check failed: artifact files could not be read")
+        return 2
+    except json.JSONDecodeError:
+        print("[WARN] Tencent protocol artifact check failed: protocol sample could not be parsed")
+        return 2
+    except tomllib.TOMLDecodeError:
+        print("[WARN] Tencent protocol artifact check failed: protocol config could not be parsed")
+        return 2
+    except ValueError as exc:
+        print(f"[WARN] Tencent protocol artifact check failed: {exc}")
+        return 2
+
+    print("Tencent protocol artifacts passed")
+    print(
+        " ".join(
+            [
+                "sample",
+                "source=redacted-har",
+                f"provider={result.provider.value}",
+                f"flow={result.flow}",
+                f"entries={result.entry_count}",
+            ]
+        )
+    )
+    print(f"config provider={result.provider.value} validated_protocol = false")
+    return 0
+
+
 def _run_tencent_protocol_guide(args: argparse.Namespace) -> int:
     provider = TencentLoginProvider(str(args.provider))
     print("Safe Tencent protocol capture workflow")
@@ -638,8 +687,13 @@ def _run_tencent_protocol_guide(args: argparse.Namespace) -> int:
         "--input captures/tencent-login.sample.json "
         "--output profiles/tencent-account-login.toml"
     )
-    print("7. Inspect only the redacted HAR, sample JSON, note, and TOML skeleton.")
-    print("8. Keep validated_protocol = false until endpoints and response rules are verified.")
+    print(
+        "7. qr-live-scanner-tencent tencent-protocol-artifact-check "
+        "--sample captures/tencent-login.sample.json "
+        "--config profiles/tencent-account-login.toml"
+    )
+    print("8. Inspect only the redacted HAR, sample JSON, note, and TOML skeleton.")
+    print("9. Keep validated_protocol = false until endpoints and response rules are verified.")
     return 0
 
 

@@ -264,6 +264,7 @@ def test_protocol_guide_cli_prints_safe_capture_workflow_without_secrets(
     assert "tencent-protocol-sample" in output
     assert "tencent-protocol-note" in output
     assert "tencent-protocol-config-skeleton" in output
+    assert "tencent-protocol-artifact-check" in output
     assert "validated_protocol = false" in output
     assert "Do not share raw HAR" in output
     assert "SECRET_VALUE_DO_NOT_LEAK" not in output
@@ -644,6 +645,248 @@ def test_account_qr_config_skeleton_cli_rejects_invalid_sample_without_writing_o
     assert exit_code == 2
     assert not output_path.exists()
     assert "protocol sample" in output.lower()
+
+
+def test_protocol_artifact_check_cli_accepts_safe_sample_and_config(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    sample_path.write_text(
+        json.dumps(
+            {
+                "source": "redacted-har",
+                "provider": "qq",
+                "flow": "account-login",
+                "entries": [
+                    {
+                        "index": 0,
+                        "method": "GET",
+                        "scheme": "https",
+                        "host": "ssl.ptlogin2.qq.com",
+                        "path": "/ptqrshow",
+                        "query_keys": ["appid"],
+                        "request_header_names": ["user-agent"],
+                        "request_body_mime_type": "",
+                        "has_request_body": False,
+                        "response_status": 200,
+                        "response_header_names": [],
+                        "response_body_mime_type": "image/png",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = false",
+                'fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow"',
+                'query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"',
+                'app_id = "TODO-verified-app-id"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-artifact-check",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol artifacts passed" in output
+    assert "provider=qq" in output
+    assert "validated_protocol = false" in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket=" not in output.lower()
+
+
+def test_protocol_artifact_check_cli_rejects_validated_config_without_echoing_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "SECRET_VALUE_DO_NOT_LEAK"
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    _write_safe_protocol_sample(sample_path)
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                f'fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow/{secret}"',
+                'query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"',
+                'app_id = "TODO-verified-app-id"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-artifact-check",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol artifact check failed" in output
+    assert "validated_protocol" in output
+    assert secret not in output
+
+
+def test_protocol_artifact_check_cli_rejects_signed_config_url_without_echoing_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "SECRET_VALUE_DO_NOT_LEAK"
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    _write_safe_protocol_sample(sample_path)
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = false",
+                f'fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow?token={secret}"',
+                'query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"',
+                'app_id = "TODO-verified-app-id"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-artifact-check",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol artifact check failed" in output
+    assert "endpoint" in output.lower()
+    assert secret not in output
+
+
+def test_protocol_artifact_check_cli_rejects_raw_sample_values_without_echoing_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "SECRET_VALUE_DO_NOT_LEAK"
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    _write_safe_protocol_config(config_path)
+    sample_path.write_text(
+        json.dumps(
+            {
+                "source": "redacted-har",
+                "provider": "qq",
+                "flow": "account-login",
+                "entries": [
+                    {
+                        "index": 0,
+                        "method": "GET",
+                        "scheme": "https",
+                        "host": "ssl.ptlogin2.qq.com",
+                        "path": "/ptqrshow",
+                        "query_keys": ["appid"],
+                        "request_header_names": ["user-agent"],
+                        "request_header_values": [secret],
+                        "request_body_mime_type": "",
+                        "has_request_body": False,
+                        "response_status": 200,
+                        "response_header_names": [],
+                        "response_body_mime_type": "image/png",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-artifact-check",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol artifact check failed" in output
+    assert "protocol sample" in output.lower()
+    assert secret not in output
+
+
+def _write_safe_protocol_sample(path: Path) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "source": "redacted-har",
+                "provider": "qq",
+                "flow": "account-login",
+                "entries": [
+                    {
+                        "index": 0,
+                        "method": "GET",
+                        "scheme": "https",
+                        "host": "ssl.ptlogin2.qq.com",
+                        "path": "/ptqrshow",
+                        "query_keys": ["appid"],
+                        "request_header_names": ["user-agent"],
+                        "request_body_mime_type": "",
+                        "has_request_body": False,
+                        "response_status": 200,
+                        "response_header_names": [],
+                        "response_body_mime_type": "image/png",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_safe_protocol_config(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = false",
+                'fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow"',
+                'query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"',
+                'app_id = "TODO-verified-app-id"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def _run_main(argv: list[str]) -> int:

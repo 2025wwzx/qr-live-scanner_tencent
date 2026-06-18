@@ -17,8 +17,9 @@ Use this note when supplying local captures for Tencent protocol research.
 5. Run `qr-live-scanner-tencent tencent-protocol-sample --input captures/tencent-login.redacted.har --output captures/tencent-login.sample.json --provider qq --flow account-login`.
 6. Run `qr-live-scanner-tencent tencent-protocol-note --input captures/tencent-login.sample.json --output captures/tencent-login.note.md`.
 7. Run `qr-live-scanner-tencent tencent-protocol-config-skeleton --input captures/tencent-login.sample.json --output profiles/tencent-account-login.toml`.
-8. Inspect only the redacted HAR, generated sample summary, generated note, and generated TOML skeleton.
-9. Keep the raw file ignored by git.
+8. Run `qr-live-scanner-tencent tencent-protocol-artifact-check --sample captures/tencent-login.sample.json --config profiles/tencent-account-login.toml`.
+9. Inspect only the redacted HAR, generated sample summary, generated note, and generated TOML skeleton.
+10. Keep the raw file ignored by git.
 
 The useful redacted capture should preserve request ordering, URL path shape,
 method, status code, non-secret enum values, and JSON field names.
@@ -28,3 +29,6 @@ those sensitive paths are already tracked by Git.
 The generated TOML skeleton keeps `validated_protocol = false` and must not
 contain Cookie, token, ticket, qrsig, UID, QR payload, query strings, or header
 values.
+The artifact check is a post-generation guard: it fails if the generated sample
+or TOML skeleton was hand-edited to include signed URLs, sensitive fields,
+raw values, or `validated_protocol = true`.

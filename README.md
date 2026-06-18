@@ -28,6 +28,7 @@ python -m pip install -e .[dev]
 qr-live-scanner-tencent gui --dry-run
 qr-live-scanner-tencent tencent-protocol-preflight
 qr-live-scanner-tencent tencent-protocol-guide --provider qq
+qr-live-scanner-tencent tencent-protocol-artifact-check --sample captures/tencent-login.sample.json --config profiles/tencent-account-login.toml
 python -m pytest
 python -m ruff check src tests
 python -m mypy
@@ -54,12 +55,16 @@ qr-live-scanner-tencent tencent-protocol-guide --provider qq
 qr-live-scanner-tencent tencent-protocol-sample --input captures/tencent-login.redacted.har --output captures/tencent-login.sample.json --provider qq --flow account-login
 qr-live-scanner-tencent tencent-protocol-note --input captures/tencent-login.sample.json --output captures/tencent-login.note.md
 qr-live-scanner-tencent tencent-protocol-config-skeleton --input captures/tencent-login.sample.json --output profiles/tencent-account-login.toml
+qr-live-scanner-tencent tencent-protocol-artifact-check --sample captures/tencent-login.sample.json --config profiles/tencent-account-login.toml
 ```
 
 The generated config skeleton is local-only and keeps
 `validated_protocol = false`; it does not enable real QQ/WeChat HTTP and must
 not contain query strings, fragments, Cookie, token, ticket, qrsig, UID, QR
 payload, or header values.
+`tencent-protocol-artifact-check` should pass before sharing or using the
+generated research artifacts; it rejects unsafe sample/config edits without
+printing the raw values.
 
 已新增独立账号登录链路：`tencent-login` 会由本项目生成 QQ/微信账号登录二维码，
 确认成功后将 `TencentSession` 保存到本地 keyring 的 `qr-live-scanner-tencent`

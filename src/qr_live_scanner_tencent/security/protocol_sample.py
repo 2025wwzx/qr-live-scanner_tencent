@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlparse, urlsplit, urlunsplit
 
+from qr_live_scanner_tencent.accounts.tencent_qr_login import (
+    ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS,
+    ACCOUNT_QR_LOGIN_CONFIG_SECTION,
+    ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS,
+)
 from qr_live_scanner_tencent.interfaces import TencentLoginProvider
 from qr_live_scanner_tencent.security.har import (
     REDACTED_VALUE,
@@ -42,6 +48,38 @@ ACCOUNT_QR_QUERY_ENDPOINT_KEYWORDS = (
     "login",
     "ptqrlogin",
 )
+TENCENT_PROTOCOL_SAMPLE_ARTIFACT_FIELDS = frozenset(
+    {"source", "provider", "flow", "entries"}
+)
+TENCENT_PROTOCOL_SAMPLE_ENTRY_ARTIFACT_FIELDS = frozenset(
+    {
+        "index",
+        "method",
+        "scheme",
+        "host",
+        "path",
+        "query_keys",
+        "request_header_names",
+        "request_body_mime_type",
+        "has_request_body",
+        "response_status",
+        "response_header_names",
+        "response_body_mime_type",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TencentProtocolArtifactCheckResult:
+    """腾讯协议产物安全检查结果。
+
+    该结果只包含 provider、flow 和条目数量等非敏感摘要，供 CLI 输出使用。
+    Cookie、token、ticket、UID、二维码 payload 或 URL 参数值不得进入该对象。
+    """
+
+    provider: TencentLoginProvider
+    flow: str
+    entry_count: int
 
 
 def build_tencent_protocol_sample_from_har(
@@ -137,6 +175,27 @@ def render_tencent_protocol_note(sample: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def check_tencent_protocol_artifacts(
+    sample: dict[str, Any],
+    config: dict[str, Any],
+) -> TencentProtocolArtifactCheckResult:
+    """检查协议 sample JSON 与账号登录 TOML 是否仍处于安全研究状态。
+
+    该函数用于 `tencent-protocol-config-skeleton` 之后的事后护栏：它会拒绝
+    手动改成 `validated_protocol = true` 的配置、带 query/fragment 的 endpoint、
+    疑似凭据字段，以及不符合生成器 schema 的 sample JSON。错误消息只描述类别，
+    不回显文件中的原始值。
+    """
+
+    provider, flow, entry_count = _validate_protocol_sample_artifact(sample)
+    _validate_account_qr_config_artifact(config, provider=provider)
+    return TencentProtocolArtifactCheckResult(
+        provider=provider,
+        flow=flow,
+        entry_count=entry_count,
+    )
+
+
 def render_tencent_account_qr_config_skeleton(sample: dict[str, Any]) -> str:
     """将账号登录协议样本渲染为安全默认的本地 TOML 配置骨架。
 
@@ -179,6 +238,163 @@ def render_tencent_account_qr_config_skeleton(sample: dict[str, Any]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _validate_protocol_sample_artifact(
+    sample: dict[str, Any],
+) -> tuple[TencentLoginProvider, str, int]:
+    if set(sample) != TENCENT_PROTOCOL_SAMPLE_ARTIFACT_FIELDS:
+        raise ValueError("protocol sample artifact contains unsupported fields")
+    if _sample_text(sample, "source") != "redacted-har":
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    provider = TencentLoginProvider(_sample_text(sample, "provider"))
+    flow = _validate_flow(_sample_text(sample, "flow"))
+    if flow != "account-login":
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    entries = sample.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    for entry in entries:
+        _validate_protocol_sample_artifact_entry(entry)
+    return provider, flow, len(entries)
+
+
+def _validate_protocol_sample_artifact_entry(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    if set(value) != TENCENT_PROTOCOL_SAMPLE_ENTRY_ARTIFACT_FIELDS:
+        raise ValueError("protocol sample artifact contains unsupported fields")
+
+    index = value["index"]
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    status = value["response_status"]
+    if not isinstance(status, int) or isinstance(status, bool) or status < 0:
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    if not isinstance(value["has_request_body"], bool):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+
+    scheme = _summary_text(value, "scheme").lower()
+    host = _summary_text(value, "host")
+    path = _summary_text(value, "path")
+    _validate_artifact_endpoint_shape(scheme=scheme, host=host, path=path)
+
+    _validate_artifact_token(_summary_text(value, "method"), "protocol sample method")
+    _validate_artifact_optional_token(
+        value["request_body_mime_type"],
+        "protocol sample request MIME type",
+    )
+    _validate_artifact_optional_token(
+        value["response_body_mime_type"],
+        "protocol sample response MIME type",
+    )
+    _validate_artifact_name_list(value["query_keys"], "protocol sample query keys")
+    _validate_artifact_name_list(
+        value["request_header_names"],
+        "protocol sample request headers",
+    )
+    _validate_artifact_name_list(
+        value["response_header_names"],
+        "protocol sample response headers",
+    )
+
+
+def _validate_account_qr_config_artifact(
+    config: dict[str, Any],
+    *,
+    provider: TencentLoginProvider,
+) -> None:
+    _reject_sensitive_config_artifact_keys(config)
+    if set(config) != {ACCOUNT_QR_LOGIN_CONFIG_SECTION}:
+        raise ValueError("protocol config artifact contains unsupported fields")
+    section = config.get(ACCOUNT_QR_LOGIN_CONFIG_SECTION)
+    if not isinstance(section, dict):
+        raise ValueError("protocol config artifact section is missing")
+    allowed_providers = {item.value for item in TencentLoginProvider}
+    unknown_providers = set(section) - allowed_providers
+    if unknown_providers:
+        raise ValueError("protocol config artifact contains unsupported provider sections")
+    provider_section = section.get(provider.value)
+    if not isinstance(provider_section, dict):
+        raise ValueError("protocol config artifact provider section is missing")
+    for raw_provider_section in section.values():
+        if not isinstance(raw_provider_section, dict):
+            raise ValueError("protocol config artifact provider section is invalid")
+        _validate_account_qr_config_provider_artifact(raw_provider_section)
+
+
+def _validate_account_qr_config_provider_artifact(provider_section: dict[str, Any]) -> None:
+    unknown_fields = set(provider_section) - ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS
+    if unknown_fields:
+        raise ValueError("protocol config artifact contains unsupported fields")
+    if provider_section.get("validated_protocol") is not False:
+        raise ValueError("protocol config validated_protocol must remain false")
+    _validate_artifact_endpoint_url(provider_section.get("fetch_url"))
+    _validate_artifact_endpoint_url(provider_section.get("query_url"))
+    _validate_artifact_token(
+        _required_text(provider_section.get("app_id"), "protocol config app id is required"),
+        "protocol config app id",
+    )
+
+
+def _validate_artifact_endpoint_url(value: object) -> None:
+    endpoint_url = _required_text(value, "protocol config endpoint URL is required")
+    if any(char in endpoint_url for char in "\r\n"):
+        raise ValueError("protocol config endpoint URL is invalid")
+    parsed = urlparse(endpoint_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("protocol config endpoint URL is invalid")
+    if parsed.query or parsed.fragment:
+        raise ValueError("protocol config endpoint URL must not include signed endpoint data")
+    _validate_artifact_endpoint_shape(
+        scheme=parsed.scheme,
+        host=parsed.netloc,
+        path=parsed.path,
+    )
+
+
+def _validate_artifact_endpoint_shape(*, scheme: str, host: str, path: str) -> None:
+    if scheme not in {"http", "https"}:
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    if any(char in host for char in "/?#\r\n") or any(char in path for char in "?#\r\n"):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    if not path.startswith("/"):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    _assert_redacted_url(path, "")
+
+
+def _validate_artifact_name_list(value: object, label: str) -> None:
+    if not isinstance(value, list):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    for item in value:
+        _validate_artifact_token(_required_text(item, label), label)
+
+
+def _validate_artifact_optional_token(value: object, label: str) -> None:
+    if not isinstance(value, str):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+    if not value:
+        return
+    _validate_artifact_token(value, label)
+
+
+def _validate_artifact_token(value: str, label: str) -> None:
+    text = _required_text(value, label)
+    if any(char in text for char in "\r\n"):
+        raise ValueError(PROTOCOL_SAMPLE_SCHEMA_ERROR)
+
+
+def _reject_sensitive_config_artifact_keys(value: object) -> None:
+    if isinstance(value, dict):
+        for raw_key, raw_value in value.items():
+            key = str(raw_key).strip().lower()
+            if any(fragment in key for fragment in ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS):
+                raise ValueError("protocol config artifact contains sensitive fields")
+            _reject_sensitive_config_artifact_keys(raw_value)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _reject_sensitive_config_artifact_keys(item)
 
 
 def _validate_flow(flow: str) -> str:
