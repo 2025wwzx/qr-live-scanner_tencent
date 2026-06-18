@@ -76,6 +76,12 @@ TENCENT_QQ_QRCONNECT_FETCH_URL = "https://graph.qq.com/oauth2.0/authorize"
 TENCENT_QQ_QRCONNECT_QUERY_URL = "https://graph.qq.com/oauth2.0/token"
 TENCENT_WECHAT_QRCONNECT_FETCH_URL = "https://open.weixin.qq.com/connect/qrconnect"
 TENCENT_WECHAT_QRCONNECT_QUERY_URL = "https://api.weixin.qq.com/sns/oauth2/access_token"
+TENCENT_LOGIN_SECRET_ENV_NAMES = frozenset(
+    {
+        TENCENT_QQ_APP_SECRET_ENV,
+        TENCENT_WECHAT_APP_SECRET_ENV,
+    }
+)
 
 
 class TencentAccountQRLoginServiceProtocol(Protocol):
@@ -237,6 +243,7 @@ def _build_parser() -> argparse.ArgumentParser:
     tencent_login_parser.add_argument("--open-provider-page", action="store_true")
     tencent_login_parser.add_argument("--callback-url-file")
     tencent_login_parser.add_argument("--protocol-config")
+    tencent_login_parser.add_argument("--secret-env-file")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
 
@@ -274,6 +281,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--callback-url-file",
         default="work/tencent-oauth-callback.txt",
     )
+    tencent_login_readiness_parser.add_argument("--secret-env-file")
 
     tencent_login_preflight_parser = subparsers.add_parser("tencent-login-preflight")
     tencent_login_preflight_parser.add_argument(
@@ -283,6 +291,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     tencent_login_preflight_parser.add_argument("--protocol-config", required=True)
     tencent_login_preflight_parser.add_argument("--callback-url-file")
+    tencent_login_preflight_parser.add_argument("--secret-env-file")
 
     tencent_list_parser = subparsers.add_parser("tencent-list")
     tencent_list_parser.add_argument(
@@ -1127,6 +1136,7 @@ def _run_gui_snapshot(args: argparse.Namespace) -> int:
 def _run_tencent_login(args: argparse.Namespace) -> int:
     try:
         provider = TencentLoginProvider(str(args.provider))
+        _load_tencent_secret_env_file_if_requested(args)
         qr_output_path = Path(_required_text(args.qr_output, "QR output path"))
         timeout_seconds = _validate_tencent_login_timeout(float(args.timeout_seconds))
         poll_interval_seconds = _validate_tencent_login_poll_interval(
@@ -1197,6 +1207,7 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
 def _run_tencent_login_preflight(args: argparse.Namespace) -> int:
     provider = TencentLoginProvider(str(args.provider))
     try:
+        _load_tencent_secret_env_file_if_requested(args)
         config_path = Path(_required_text(args.protocol_config, "protocol config path"))
         callback_url_file = (
             Path(callback_url_file_text)
@@ -1269,6 +1280,20 @@ def _run_tencent_login_readiness(args: argparse.Namespace) -> int:
     provider = TencentLoginProvider(str(args.provider))
     config_path = Path(_required_text(args.protocol_config, "protocol config path"))
     callback_url_file = Path(_required_text(args.callback_url_file, "callback URL file path"))
+    try:
+        _load_tencent_secret_env_file_if_requested(args)
+    except TencentAccountQRLoginError as exc:
+        print("Tencent account login readiness: invalid")
+        print(
+            f"provider={provider.value} "
+            "config=not-checked "
+            "secret_env_file=invalid "
+            "callback=not-checked "
+            "real_http=not-called "
+            "ready=no"
+        )
+        print(f"[WARN] Tencent account login readiness failed: {exc}")
+        return 2
     if not config_path.exists():
         print("Tencent account login readiness: not ready")
         print(
@@ -1322,6 +1347,53 @@ def _run_tencent_login_readiness(args: argparse.Namespace) -> int:
     )
     print("next=tencent-login-preflight" if ready else "next=fix-readiness")
     return 0 if ready else 1
+
+
+def _load_tencent_secret_env_file_if_requested(args: argparse.Namespace) -> None:
+    path_text = _optional_text(getattr(args, "secret_env_file", None))
+    if path_text is None:
+        return
+    _load_tencent_secret_env_file(Path(path_text))
+
+
+def _load_tencent_secret_env_file(path: Path) -> None:
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = "Tencent secret env file could not be loaded"
+        raise TencentAccountQRLoginError(msg) from exc
+    for raw_line in raw_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            msg = "Tencent secret env file contains invalid assignment"
+            raise TencentAccountQRLoginError(msg)
+        raw_key, raw_value = line.split("=", 1)
+        key = raw_key.strip()
+        if not ENV_VAR_NAME_PATTERN.fullmatch(key):
+            msg = "Tencent secret env file contains invalid assignment"
+            raise TencentAccountQRLoginError(msg)
+        if key not in TENCENT_LOGIN_SECRET_ENV_NAMES:
+            continue
+        value = _secret_env_file_value(raw_value)
+        if not value:
+            msg = "Tencent secret env file contains empty secret"
+            raise TencentAccountQRLoginError(msg)
+        if not _optional_text(os.environ.get(key)):
+            os.environ[key] = value
+
+
+def _secret_env_file_value(raw_value: str) -> str:
+    value = raw_value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    if "\r" in value or "\n" in value:
+        msg = "Tencent secret env file contains invalid assignment"
+        raise TencentAccountQRLoginError(msg)
+    return value.strip()
 
 
 def _tencent_login_readiness_secret_state(config: TencentAccountQRLoginConfig) -> str:

@@ -657,6 +657,66 @@ def test_tencent_login_readiness_accepts_file_handoff_when_secret_present(
     assert "oauth-callback" not in output
 
 
+def test_tencent_login_readiness_loads_secret_env_file_without_echoing_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    secret_env_path = tmp_path / ".env.tencent"
+    app_id = "verified-qq-connect-app"
+    redirect_uri = "https://login.example.test/oauth/qq/callback"
+    secret = "SECRET_QQ_APP_SECRET"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                f'redirect_uri = "{redirect_uri}"',
+                f'app_id = "{app_id}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    secret_env_path.write_text(
+        "\n".join(
+            [
+                "# local Tencent login secrets",
+                f'QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET="{secret}"',
+                "UNRELATED_SECRET=SECRET_SHOULD_BE_IGNORED",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", raising=False)
+
+    exit_code = _run_main(
+        [
+            "tencent-login-readiness",
+            "--provider",
+            "qq",
+            "--protocol-config",
+            str(config_path),
+            "--secret-env-file",
+            str(secret_env_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "secret_env=present" in output
+    assert "ready=yes" in output
+    assert secret not in output
+    assert "SECRET_SHOULD_BE_IGNORED" not in output
+    assert str(secret_env_path) not in output
+    assert app_id not in output
+    assert "login.example.test" not in output
+
+
 def test_tencent_login_readiness_reports_missing_secret_without_values(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -755,6 +815,89 @@ def test_tencent_login_readiness_reports_busy_local_bind_without_port_value(
     assert callback_bind_url not in output
     assert str(unused_tcp_port) not in output
     assert "login.example.test" not in output
+
+
+def test_tencent_login_preflight_loads_secret_env_file_without_http_or_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    unused_tcp_port: int,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    secret_env_path = tmp_path / ".env.tencent"
+    secret = "SECRET_QQ_APP_SECRET"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/oauth/qq/callback"',
+                f'callback_bind_url = "http://127.0.0.1:{unused_tcp_port}/qq/callback"',
+                'app_id = "verified-qq-connect-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    secret_env_path.write_text(
+        f"export QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET={secret}\n",
+        encoding="utf-8",
+    )
+
+    def fail_if_http_client_is_created(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("preflight must not create HTTP client")
+
+    monkeypatch.delenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", raising=False)
+    monkeypatch.setattr(httpx, "AsyncClient", fail_if_http_client_is_created)
+
+    exit_code = _run_main(
+        [
+            "tencent-login-preflight",
+            "--provider",
+            "qq",
+            "--protocol-config",
+            str(config_path),
+            "--secret-env-file",
+            str(secret_env_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent account login preflight passed" in output
+    assert "secret_env=present" in output
+    assert "real_http=not-called" in output
+    assert secret not in output
+    assert str(secret_env_path) not in output
+    assert "login.example.test" not in output
+    assert str(unused_tcp_port) not in output
+
+
+def test_tencent_login_readiness_rejects_invalid_secret_env_file_without_values(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    secret_env_path = tmp_path / ".env.tencent"
+    secret_env_path.write_text("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET\n", encoding="utf-8")
+
+    exit_code = _run_main(
+        [
+            "tencent-login-readiness",
+            "--provider",
+            "qq",
+            "--secret-env-file",
+            str(secret_env_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "secret_env_file=invalid" in output
+    assert "invalid assignment" in output
+    assert str(secret_env_path) not in output
+    assert "QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET" not in output
 
 
 def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(

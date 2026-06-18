@@ -125,7 +125,8 @@ qr-live-scanner-tencent tencent-login-config-init `
 qr-live-scanner-tencent tencent-login-readiness `
   --provider qq `
   --protocol-config profiles/tencent-account-login.toml `
-  --callback-url-file work/tencent-oauth-callback.txt
+  --callback-url-file work/tencent-oauth-callback.txt `
+  --secret-env-file .env.tencent
 
 qr-live-scanner-tencent tencent-protocol-config-check `
   --provider qq `
@@ -134,13 +135,15 @@ qr-live-scanner-tencent tencent-protocol-config-check `
 qr-live-scanner-tencent tencent-login-preflight `
   --provider qq `
   --protocol-config profiles/tencent-account-login.toml `
-  --callback-url-file work/tencent-oauth-callback.txt
+  --callback-url-file work/tencent-oauth-callback.txt `
+  --secret-env-file .env.tencent
 
 qr-live-scanner-tencent tencent-login `
   --provider qq `
   --protocol-config profiles/tencent-account-login.toml `
   --open-provider-page `
-  --callback-url-file work/tencent-oauth-callback.txt
+  --callback-url-file work/tencent-oauth-callback.txt `
+  --secret-env-file .env.tencent
 ```
 
 `tencent-login-config-init` is a local helper for the first real QR Connect
@@ -157,6 +160,12 @@ piece is still missing. It reports only safe state labels: config present or
 missing, protocol mode, secret environment presence, callback mode, and final
 readiness. It does not echo app IDs, redirect URIs, callback URLs, secret
 values, OAuth codes, token data, openid/unionid, Cookie, or QR payload.
+If setting shell environment variables is inconvenient, pass
+`--secret-env-file .env.tencent` to readiness, preflight, or login. The loader
+accepts only `QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET` and
+`QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET`, ignores other keys, does not
+overwrite already-set shell variables, and never prints file contents. `.env`
+and `.env.*` paths are already ignored by git.
 
 The config loader rejects sensitive field names, sensitive `app_id` values,
 endpoint URLs with query strings or fragments, and sensitive endpoint path segments.
