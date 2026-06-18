@@ -129,6 +129,7 @@ GUI 保存 TencentSession 后同样会执行账号索引验证，防止账号表
 登录渠道下从“账号管理”菜单进入“导入已保存账号”，输入本地测试账号 ID，将
 该账号加入 GUI 账号列表。导入过程只检查本机 keyring 中已有的 TencentSession，
 不会显示或导出 Cookie、token、ticket、二维码 payload，也不会连接腾讯服务。
+导入成功前会验证本地账号索引已经包含当前 provider/UID，防止账号表和索引状态脱节。
 
 从当前版本起，CLI/GUI 保存 TencentSession 时还会维护本地账号索引；在同一个
 登录渠道下可以直接使用“账号管理” -> “导入全部已保存账号”，把索引里的当前

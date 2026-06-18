@@ -632,6 +632,60 @@ def test_main_window_imports_cli_saved_tencent_account_by_uid(
     assert "cookie" not in window.statusBar().currentMessage().lower()
 
 
+def test_main_window_import_account_fails_when_index_missing_after_read(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    class MissingIndexStore(FakeAccountStore):
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.WECHAT
+            return []
+
+    store = MissingIndexStore()
+    store.save_tencent_session(
+        _tencent_session("cli-wechat-user", "SECRET_WECHAT_TOKEN", TencentLoginProvider.WECHAT),
+        authorized=True,
+    )
+
+    class FakeImportTencentAccountDialog:
+        def __init__(self, **kwargs: object) -> None:
+            assert kwargs["provider"] is TencentLoginProvider.WECHAT
+            self._uid = "cli-wechat-user"
+
+        def exec(self) -> int:
+            return int(QDialog.DialogCode.Accepted)
+
+        def uid(self) -> str:
+            return self._uid
+
+    monkeypatch.setattr(
+        main_window_module,
+        "ImportTencentAccountDialog",
+        FakeImportTencentAccountDialog,
+        raising=False,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window.provider_combo.setCurrentIndex(
+        window.provider_combo.findData(TencentLoginProvider.WECHAT.value)
+    )
+
+    window._show_import_account_dialog()
+
+    message = window.statusBar().currentMessage()
+    assert window.account_table.rowCount() == 0
+    assert "索引验证失败" in message
+    assert "cli-wechat-user" not in message
+    assert "SECRET_WECHAT_TOKEN" not in message
+    assert "token" not in message.lower()
+    assert "cookie" not in message.lower()
+    assert "ticket" not in message.lower()
+    assert "payload" not in message.lower()
+
+
 def test_main_window_import_account_redacts_storage_errors(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,

@@ -579,6 +579,19 @@ class MainWindow(QMainWindow):
         if session.provider is not provider:
             self.statusBar().showMessage("本地账号 provider 不匹配")
             return
+        try:
+            authorized = self.account_store.is_tencent_authorized(uid, provider)
+            if not _tencent_account_index_contains(
+                self.account_store,
+                uid,
+                provider,
+                authorized=authorized,
+            ):
+                self.statusBar().showMessage("本地已保存账号导入失败：索引验证失败")
+                return
+        except AccountStoreError:
+            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
         self._refresh_account_table_row(uid)
         if self._account_table_row(uid) >= 0:
             self.statusBar().showMessage("本地已保存账号已导入")
