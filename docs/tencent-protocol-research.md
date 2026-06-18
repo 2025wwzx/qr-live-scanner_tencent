@@ -112,6 +112,25 @@ qr-live-scanner-tencent tencent-protocol-config-skeleton `
   --output profiles/tencent-account-login.toml
 ```
 
+Then verify that the generated artifacts still contain only safe research
+metadata:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-artifact-check `
+  --sample captures/tencent-login.sample.json `
+  --config profiles/tencent-account-login.toml
+```
+
+After every validation checklist item has been investigated and marked in the
+note, run the readiness gate:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-readiness `
+  --sample captures/tencent-login.sample.json `
+  --config profiles/tencent-account-login.toml `
+  --note captures/tencent-login.note.md
+```
+
 The sample file keeps only method, host, path, query/header names, status code,
 and MIME type. It rejects unredacted Cookie, token, ticket, account ID, UID,
 QR payload, request body text, and signed URL fragments before writing output.
@@ -122,6 +141,8 @@ The config skeleton keeps only provider section, `validated_protocol = false`,
 clean endpoint URLs without query strings or fragments, and an app ID
 placeholder. It must be manually verified and edited before it can be used for
 real HTTP.
+The artifact and readiness commands are local research gates only. They keep
+`real_http=disabled` and do not switch `validated_protocol` to true.
 
 Inspect only the redacted file. Raw HAR, Cookie, token, QR payload, account ID,
 and full query strings must stay local and must not be committed.
@@ -139,3 +160,6 @@ Real confirm may be enabled only after all of these are true:
 - Logs and CLI output are verified to avoid leaking Cookie, token, account ID,
   QR payload, scan token, and full signed URLs.
 - HTTP tests are fully mocked and do not depend on a real account.
+- `tencent-protocol-artifact-check` and `tencent-protocol-readiness` pass on the
+  sanitized sample, TOML skeleton, and completed note before any config is
+  considered for manual promotion.

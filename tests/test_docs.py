@@ -11,7 +11,9 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "被 git 跟踪，preflight 会失败" in readme
     assert "tencent-protocol-guide --provider qq" in readme
     assert "tencent-protocol-artifact-check" in readme
+    assert "tencent-protocol-readiness" in readme
     assert "rejects unsafe sample/config edits" in readme
+    assert "real_http=disabled" in readme
     assert "账号管理" in readme
     assert "新增账号" in readme
     assert "导入已保存账号" in readme
@@ -66,4 +68,12 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
 
     provide_real_values = Path("docs/provide-real-values.md").read_text(encoding="utf-8")
     assert "tencent-protocol-artifact-check" in provide_real_values
+    assert "tencent-protocol-readiness" in provide_real_values
     assert "`validated_protocol = true`" in provide_real_values
+
+    protocol_research = Path("docs/tencent-protocol-research.md").read_text(
+        encoding="utf-8"
+    )
+    assert "tencent-protocol-artifact-check" in protocol_research
+    assert "tencent-protocol-readiness" in protocol_research
+    assert "`real_http=disabled`" in protocol_research

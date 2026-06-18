@@ -29,6 +29,7 @@ qr-live-scanner-tencent gui --dry-run
 qr-live-scanner-tencent tencent-protocol-preflight
 qr-live-scanner-tencent tencent-protocol-guide --provider qq
 qr-live-scanner-tencent tencent-protocol-artifact-check --sample captures/tencent-login.sample.json --config profiles/tencent-account-login.toml
+qr-live-scanner-tencent tencent-protocol-readiness --sample captures/tencent-login.sample.json --config profiles/tencent-account-login.toml --note captures/tencent-login.note.md
 python -m pytest
 python -m ruff check src tests
 python -m mypy
@@ -56,6 +57,7 @@ qr-live-scanner-tencent tencent-protocol-sample --input captures/tencent-login.r
 qr-live-scanner-tencent tencent-protocol-note --input captures/tencent-login.sample.json --output captures/tencent-login.note.md
 qr-live-scanner-tencent tencent-protocol-config-skeleton --input captures/tencent-login.sample.json --output profiles/tencent-account-login.toml
 qr-live-scanner-tencent tencent-protocol-artifact-check --sample captures/tencent-login.sample.json --config profiles/tencent-account-login.toml
+qr-live-scanner-tencent tencent-protocol-readiness --sample captures/tencent-login.sample.json --config profiles/tencent-account-login.toml --note captures/tencent-login.note.md
 ```
 
 The generated config skeleton is local-only and keeps
@@ -65,6 +67,8 @@ payload, or header values.
 `tencent-protocol-artifact-check` should pass before sharing or using the
 generated research artifacts; it rejects unsafe sample/config edits without
 printing the raw values.
+`tencent-protocol-readiness` checks the generated note checklist and keeps
+`real_http=disabled`; it is a research gate, not a real-login switch.
 
 已新增独立账号登录链路：`tencent-login` 会由本项目生成 QQ/微信账号登录二维码，
 确认成功后将 `TencentSession` 保存到本地 keyring 的 `qr-live-scanner-tencent`

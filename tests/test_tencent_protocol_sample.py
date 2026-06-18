@@ -265,6 +265,7 @@ def test_protocol_guide_cli_prints_safe_capture_workflow_without_secrets(
     assert "tencent-protocol-note" in output
     assert "tencent-protocol-config-skeleton" in output
     assert "tencent-protocol-artifact-check" in output
+    assert "tencent-protocol-readiness" in output
     assert "validated_protocol = false" in output
     assert "Do not share raw HAR" in output
     assert "SECRET_VALUE_DO_NOT_LEAK" not in output
@@ -841,6 +842,124 @@ def test_protocol_artifact_check_cli_rejects_raw_sample_values_without_echoing_v
     assert exit_code == 2
     assert "Tencent protocol artifact check failed" in output
     assert "protocol sample" in output.lower()
+    assert secret not in output
+
+
+def test_protocol_readiness_cli_blocks_unchecked_validation_note(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    note_path = tmp_path / "tencent-login.note.md"
+    _write_safe_protocol_sample(sample_path)
+    _write_safe_protocol_config(config_path)
+    sample = json.loads(sample_path.read_text(encoding="utf-8"))
+    note_path.write_text(render_tencent_protocol_note(sample), encoding="utf-8")
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-readiness",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+            "--note",
+            str(note_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "Tencent protocol readiness blocked" in output
+    assert "checked=0/8" in output
+    assert "real_http=disabled" in output
+    assert "SECRET_VALUE_DO_NOT_LEAK" not in output
+    assert "ticket=" not in output.lower()
+
+
+def test_protocol_readiness_cli_accepts_complete_validation_note(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    note_path = tmp_path / "tencent-login.note.md"
+    _write_safe_protocol_sample(sample_path)
+    _write_safe_protocol_config(config_path)
+    sample = json.loads(sample_path.read_text(encoding="utf-8"))
+    note_path.write_text(
+        render_tencent_protocol_note(sample).replace("- [ ] ", "- [x] "),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-readiness",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+            "--note",
+            str(note_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol readiness passed" in output
+    assert "provider=qq" in output
+    assert "checked=8/8" in output
+    assert "real_http=disabled" in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket=" not in output.lower()
+
+
+def test_protocol_readiness_cli_rejects_unsafe_artifacts_without_echoing_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "SECRET_VALUE_DO_NOT_LEAK"
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    note_path = tmp_path / "tencent-login.note.md"
+    _write_safe_protocol_sample(sample_path)
+    sample = json.loads(sample_path.read_text(encoding="utf-8"))
+    note_path.write_text(
+        render_tencent_protocol_note(sample).replace("- [ ] ", "- [x] "),
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                f'fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow?ticket={secret}"',
+                'query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"',
+                'app_id = "TODO-verified-app-id"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-readiness",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+            "--note",
+            str(note_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol readiness failed" in output
+    assert "validated_protocol" in output
     assert secret not in output
 
 

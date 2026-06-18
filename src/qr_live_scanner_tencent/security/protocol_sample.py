@@ -82,6 +82,26 @@ class TencentProtocolArtifactCheckResult:
     entry_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class TencentProtocolReadinessResult:
+    """腾讯协议验证记录就绪状态。
+
+    该对象只汇总 checklist 完成度和协议产物摘要。它不代表真实 HTTP 已启用，
+    也不携带任何账号、票据、Cookie 或二维码原文。
+    """
+
+    provider: TencentLoginProvider
+    flow: str
+    entry_count: int
+    checked_count: int
+    total_count: int
+    missing_items: tuple[str, ...]
+
+    @property
+    def ready(self) -> bool:
+        return not self.missing_items
+
+
 def build_tencent_protocol_sample_from_har(
     har: dict[str, Any],
     *,
@@ -196,6 +216,33 @@ def check_tencent_protocol_artifacts(
     )
 
 
+def check_tencent_protocol_readiness(
+    sample: dict[str, Any],
+    config: dict[str, Any],
+    note_text: str,
+) -> TencentProtocolReadinessResult:
+    """检查协议研究记录是否完成到可人工评审状态。
+
+    函数先复用 artifact 安全检查，确保 sample/config 没有危险手改；随后只读取
+    `render_tencent_protocol_note` 生成的 checklist 状态。返回 ready 只表示记录已
+    填完，可进入人工复核；真实 QQ/微信 HTTP 仍保持禁用。
+    """
+
+    artifact = check_tencent_protocol_artifacts(sample, config)
+    checklist = _protocol_note_checklist_state(note_text)
+    missing_items = tuple(
+        item for item in PROTOCOL_NOTE_CHECKLIST_ITEMS if checklist.get(item) is not True
+    )
+    return TencentProtocolReadinessResult(
+        provider=artifact.provider,
+        flow=artifact.flow,
+        entry_count=artifact.entry_count,
+        checked_count=len(PROTOCOL_NOTE_CHECKLIST_ITEMS) - len(missing_items),
+        total_count=len(PROTOCOL_NOTE_CHECKLIST_ITEMS),
+        missing_items=missing_items,
+    )
+
+
 def render_tencent_account_qr_config_skeleton(sample: dict[str, Any]) -> str:
     """将账号登录协议样本渲染为安全默认的本地 TOML 配置骨架。
 
@@ -257,6 +304,28 @@ def _validate_protocol_sample_artifact(
     for entry in entries:
         _validate_protocol_sample_artifact_entry(entry)
     return provider, flow, len(entries)
+
+
+def _protocol_note_checklist_state(note_text: str) -> dict[str, bool]:
+    text = _required_text(note_text, "protocol note text is required")
+    checklist: dict[str, bool] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("- [") or len(line) < 7:
+            continue
+        marker = line[3].lower()
+        if line[4:6] != "] ":
+            continue
+        item = line[6:].strip()
+        if item in PROTOCOL_NOTE_CHECKLIST_ITEMS:
+            checklist[item] = marker == "x"
+
+    missing_template_items = [
+        item for item in PROTOCOL_NOTE_CHECKLIST_ITEMS if item not in checklist
+    ]
+    if missing_template_items:
+        raise ValueError("protocol note validation checklist is incomplete")
+    return checklist
 
 
 def _validate_protocol_sample_artifact_entry(value: Any) -> None:
