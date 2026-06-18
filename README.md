@@ -253,11 +253,16 @@ or `::1`.
 Use `--open-qr` to open the locally generated QR image, or
 `--open-provider-page` to open the official QQ/WeChat authorization page for
 OAuth QR-connect modes. Neither option prints the full authorization URL.
+If the public redirect cannot forward to the local callback listener, use
+`--callback-url-file work/tencent-oauth-callback.txt`; after mobile approval,
+paste the provider redirect URL into that ignored local file. The file contains
+temporary OAuth code/state data, so do not commit or share it. The command reads
+it in memory, accepts the callback, and then attempts to delete the file.
 
 ```powershell
 qr-live-scanner-tencent tencent-protocol-config-check --provider qq --config .\profiles\tencent-account-login.toml
 qr-live-scanner-tencent tencent-login-preflight --provider qq --protocol-config .\profiles\tencent-account-login.toml
-qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml --open-qr
+qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml --open-provider-page --callback-url-file .\work\tencent-oauth-callback.txt
 ```
 
 ## License

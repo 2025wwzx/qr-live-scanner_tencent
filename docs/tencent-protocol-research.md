@@ -143,6 +143,12 @@ Tencent.
 For OAuth QR-connect modes, `--open-provider-page` may be used instead of
 `--open-qr` when the provider page itself must render the QR code; the full
 authorization URL remains in memory and is not printed.
+If a tunnel or registered callback page cannot forward into the local listener,
+`--callback-url-file work/tencent-oauth-callback.txt` can be used as a manual
+handoff. Paste the provider redirect URL into that ignored local file only; it
+contains temporary OAuth code/state data and must never be committed or shared.
+The running command accepts the callback from the file and then attempts to
+delete it.
 
 ## Required Validation
 

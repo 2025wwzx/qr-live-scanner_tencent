@@ -636,12 +636,14 @@ def test_tencent_login_cli_uses_local_protocol_config(
         poll_interval_seconds: float,
         open_qr: bool = False,
         open_provider_page: bool = False,
+        callback_url_file: Path | None = None,
     ) -> TencentSession:
         assert qr_output_path == tmp_path / "tencent-login.png"
         assert timeout_seconds == 3
         assert poll_interval_seconds == 0.01
         assert open_qr is False
         assert open_provider_page is False
+        assert callback_url_file is None
         assert hasattr(service, "config")
         config = service.config
         captured_configs.append(
@@ -731,6 +733,7 @@ def test_tencent_login_cli_rejects_mismatched_provider_session(
         poll_interval_seconds: float,
         open_qr: bool = False,
         open_provider_page: bool = False,
+        callback_url_file: Path | None = None,
     ) -> TencentSession:
         assert service is not None
         assert qr_output_path == tmp_path / "tencent-login.png"
@@ -738,6 +741,7 @@ def test_tencent_login_cli_rejects_mismatched_provider_session(
         assert poll_interval_seconds == 0.01
         assert open_qr is False
         assert open_provider_page is False
+        assert callback_url_file is None
         return TencentSession(
             uid="wechat-user",
             provider=TencentLoginProvider.QQ,
@@ -796,6 +800,7 @@ def test_tencent_login_cli_passes_open_qr_flag(
         poll_interval_seconds: float,
         open_qr: bool = False,
         open_provider_page: bool = False,
+        callback_url_file: Path | None = None,
     ) -> TencentSession:
         assert service is not None
         assert qr_output_path == tmp_path / "tencent-login.png"
@@ -803,6 +808,7 @@ def test_tencent_login_cli_passes_open_qr_flag(
         assert poll_interval_seconds == 0.01
         captured_open_flags.append(open_qr)
         assert open_provider_page is False
+        assert callback_url_file is None
         return TencentSession(
             uid="10001",
             provider=TencentLoginProvider.QQ,
@@ -877,6 +883,7 @@ def test_tencent_login_cli_passes_open_provider_page_flag(
         poll_interval_seconds: float,
         open_qr: bool = False,
         open_provider_page: bool = False,
+        callback_url_file: Path | None = None,
     ) -> TencentSession:
         assert service is not None
         assert qr_output_path == tmp_path / "tencent-login.png"
@@ -884,6 +891,7 @@ def test_tencent_login_cli_passes_open_provider_page_flag(
         assert poll_interval_seconds == 0.01
         assert open_qr is False
         captured_open_provider_flags.append(open_provider_page)
+        assert callback_url_file is None
         return TencentSession(
             uid="10001",
             provider=TencentLoginProvider.WECHAT,
@@ -939,6 +947,92 @@ def test_tencent_login_cli_passes_open_provider_page_flag(
     assert exit_code == 0
     assert captured_open_provider_flags == [True]
     assert "Tencent account session saved" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "10001" not in output
+
+
+def test_tencent_login_cli_passes_callback_url_file(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    callback_file = tmp_path / "oauth-callback.txt"
+    captured_callback_files: list[Path | None] = []
+
+    async def fake_capture(
+        service: object,
+        *,
+        qr_output_path: Path,
+        timeout_seconds: float,
+        poll_interval_seconds: float,
+        open_qr: bool = False,
+        open_provider_page: bool = False,
+        callback_url_file: Path | None = None,
+    ) -> TencentSession:
+        assert service is not None
+        assert qr_output_path == tmp_path / "tencent-login.png"
+        assert timeout_seconds == 3
+        assert poll_interval_seconds == 0.01
+        assert open_qr is False
+        assert open_provider_page is False
+        captured_callback_files.append(callback_url_file)
+        return TencentSession(
+            uid="10001",
+            provider=TencentLoginProvider.QQ,
+            credentials={"access_token": "SECRET_ACCESS_TOKEN", "openid": "SECRET_OPENID"},
+        )
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.saved: list[tuple[TencentSession, bool]] = []
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            self.saved.append((session, authorized))
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return [
+                TencentAccountIndexEntry(
+                    uid=session.uid,
+                    provider=session.provider,
+                    authorized=authorized,
+                )
+                for session, authorized in self.saved
+            ]
+
+    monkeypatch.setattr(main_module, "_capture_tencent_session_from_qr", fake_capture)
+    monkeypatch.setattr(
+        main_module,
+        "_new_tencent_account_qr_login_service",
+        lambda _provider, **_kwargs: object(),
+    )
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(
+        [
+            "tencent-login",
+            "--provider",
+            "qq",
+            "--callback-url-file",
+            str(callback_file),
+            "--qr-output",
+            str(tmp_path / "tencent-login.png"),
+            "--timeout-seconds",
+            "3",
+            "--poll-interval-seconds",
+            "0.01",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured_callback_files == [callback_file]
+    assert "Tencent account session saved" in output
+    assert str(callback_file) not in output
     assert "SECRET_ACCESS_TOKEN" not in output
     assert "10001" not in output
 
@@ -1911,6 +2005,139 @@ async def test_tencent_login_capture_opens_provider_page_without_echoing_payload
     assert "SECRET_TICKET" not in output
     assert "SECRET_ACCESS_TOKEN" not in output
     assert "SECRET_OPENID" not in output
+
+
+async def test_tencent_login_capture_accepts_callback_url_file_without_echoing_values(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    accepted_callbacks: list[tuple[str, str]] = []
+    closed: list[bool] = []
+
+    class FakeService:
+        async def fetch_qr(self) -> TencentAccountQRTicket:
+            return TencentAccountQRTicket(
+                provider=TencentLoginProvider.QQ,
+                app_id="test-app",
+                ticket="SECRET_STATE",
+                qr_url="https://graph.qq.com/oauth2.0/authorize?state=SECRET_STATE",
+                device_id="0123456789abcdef0123456789abcdef",
+            )
+
+        def write_qr_png(self, ticket: TencentAccountQRTicket, output_path: Path) -> None:
+            assert ticket.ticket == "SECRET_STATE"
+            output_path.write_bytes(b"PNG")
+
+        def accept_oauth_callback(self, *, state: str, code: str) -> None:
+            accepted_callbacks.append((state, code))
+
+        async def query_qr(self, ticket: TencentAccountQRTicket) -> TencentAccountQRLoginStatus:
+            assert ticket.ticket == "SECRET_STATE"
+            if not accepted_callbacks:
+                return TencentAccountQRLoginStatus(
+                    provider=TencentLoginProvider.QQ,
+                    state=TencentAccountQRLoginState.WAITING,
+                )
+            return TencentAccountQRLoginStatus(
+                provider=TencentLoginProvider.QQ,
+                state=TencentAccountQRLoginState.CONFIRMED,
+                session=TencentSession(
+                    uid="10001",
+                    provider=TencentLoginProvider.QQ,
+                    credentials={
+                        "access_token": "SECRET_ACCESS_TOKEN",
+                        "openid": "SECRET_OPENID",
+                    },
+                ),
+            )
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    callback_file = tmp_path / "oauth-callback.txt"
+    callback_file.write_text(
+        "https://login.example.test/qq/callback?code=SECRET_CODE&state=SECRET_STATE",
+        encoding="utf-8",
+    )
+    qr_path = tmp_path / "tencent-login.png"
+
+    session = await main_module._capture_tencent_session_from_qr(
+        FakeService(),
+        qr_output_path=qr_path,
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+        callback_url_file=callback_file,
+    )
+    output = capsys.readouterr().out
+
+    assert session.provider is TencentLoginProvider.QQ
+    assert accepted_callbacks == [("SECRET_STATE", "SECRET_CODE")]
+    assert closed == [True]
+    assert not callback_file.exists()
+    assert not qr_path.exists()
+    assert "Tencent account OAuth callback file accepted" in output
+    assert "SECRET_STATE" not in output
+    assert "SECRET_CODE" not in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "SECRET_OPENID" not in output
+    assert "login.example.test" not in output
+
+
+async def test_tencent_login_capture_rejects_callback_url_file_state_mismatch(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    closed: list[bool] = []
+
+    class FakeService:
+        async def fetch_qr(self) -> TencentAccountQRTicket:
+            return TencentAccountQRTicket(
+                provider=TencentLoginProvider.WECHAT,
+                app_id="test-app",
+                ticket="SECRET_EXPECTED_STATE",
+                qr_url="https://open.weixin.qq.com/connect/qrconnect?state=SECRET_EXPECTED_STATE",
+                device_id="0123456789abcdef0123456789abcdef",
+            )
+
+        def write_qr_png(self, ticket: TencentAccountQRTicket, output_path: Path) -> None:
+            assert ticket.ticket == "SECRET_EXPECTED_STATE"
+            output_path.write_bytes(b"PNG")
+
+        def accept_oauth_callback(self, *, state: str, code: str) -> None:
+            raise AssertionError(f"unexpected callback {state} {code}")
+
+        async def query_qr(self, ticket: TencentAccountQRTicket) -> TencentAccountQRLoginStatus:
+            raise AssertionError(f"query should not run after mismatched callback {ticket.ticket}")
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    callback_file = tmp_path / "oauth-callback.txt"
+    callback_file.write_text(
+        "https://login.example.test/wechat/callback?code=SECRET_CODE&state=SECRET_OTHER_STATE",
+        encoding="utf-8",
+    )
+    qr_path = tmp_path / "tencent-login.png"
+
+    with pytest.raises(TencentAccountQRLoginError, match="state mismatch") as exc_info:
+        await main_module._capture_tencent_session_from_qr(
+            FakeService(),
+            qr_output_path=qr_path,
+            timeout_seconds=1.0,
+            poll_interval_seconds=0.01,
+            callback_url_file=callback_file,
+        )
+    output = capsys.readouterr().out
+
+    assert closed == [True]
+    assert callback_file.exists()
+    assert not qr_path.exists()
+    assert "SECRET_EXPECTED_STATE" not in str(exc_info.value)
+    assert "SECRET_OTHER_STATE" not in str(exc_info.value)
+    assert "SECRET_CODE" not in str(exc_info.value)
+    assert "SECRET_EXPECTED_STATE" not in output
+    assert "SECRET_OTHER_STATE" not in output
+    assert "SECRET_CODE" not in output
 
 
 def _run_main(argv: list[str]) -> int:

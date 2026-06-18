@@ -14,7 +14,7 @@ import tomllib
 from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -226,6 +226,7 @@ def _build_parser() -> argparse.ArgumentParser:
     tencent_login_parser.add_argument("--qr-output", default="work/tencent-login-qr.png")
     tencent_login_parser.add_argument("--open-qr", action="store_true")
     tencent_login_parser.add_argument("--open-provider-page", action="store_true")
+    tencent_login_parser.add_argument("--callback-url-file")
     tencent_login_parser.add_argument("--protocol-config")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
@@ -1123,6 +1124,11 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
                 poll_interval_seconds=poll_interval_seconds,
                 open_qr=bool(args.open_qr),
                 open_provider_page=bool(args.open_provider_page),
+                callback_url_file=(
+                    Path(callback_url_file)
+                    if (callback_url_file := _optional_text(args.callback_url_file))
+                    else None
+                ),
             )
         )
         if session.provider is not provider:
@@ -1472,6 +1478,7 @@ async def _capture_tencent_session_from_qr(
     poll_interval_seconds: float,
     open_qr: bool = False,
     open_provider_page: bool = False,
+    callback_url_file: Path | None = None,
 ) -> TencentSession:
     try:
         ticket = await service.fetch_qr()
@@ -1491,7 +1498,20 @@ async def _capture_tencent_session_from_qr(
                 print(f"[WARN] Tencent account provider page open failed: {exc}")
         deadline = time.monotonic() + timeout_seconds
         scanned_reported = False
+        callback_file_reported = False
         while time.monotonic() < deadline:
+            if callback_url_file is not None and _accept_tencent_callback_url_file(
+                service,
+                ticket,
+                callback_url_file,
+            ):
+                if not callback_file_reported:
+                    print("Tencent account OAuth callback file accepted")
+                    callback_file_reported = True
+                try:
+                    _remove_tencent_callback_url_file(callback_url_file)
+                except TencentAccountQRLoginError as exc:
+                    print(f"[WARN] Tencent account OAuth callback cleanup failed: {exc}")
             status = await service.query_qr(ticket)
             if status.state is TencentAccountQRLoginState.SCANNED and not scanned_reported:
                 scanned_reported = True
@@ -1532,6 +1552,77 @@ def _remove_tencent_qr_png(output_path: Path) -> None:
         output_path.unlink(missing_ok=True)
     except OSError as exc:
         msg = "Tencent account QR cleanup failed"
+        raise TencentAccountQRLoginError(msg) from exc
+
+
+def _accept_tencent_callback_url_file(
+    service: object,
+    ticket: TencentAccountQRTicket,
+    callback_url_file: Path,
+) -> bool:
+    if not callback_url_file.exists():
+        return False
+    try:
+        raw_text = callback_url_file.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = "Tencent account OAuth callback file could not be read"
+        raise TencentAccountQRLoginError(msg) from exc
+    callback_text = _first_nonempty_line(raw_text)
+    if not callback_text:
+        return False
+    code, state = _parse_tencent_oauth_callback_text(callback_text)
+    if state != ticket.ticket:
+        msg = "Tencent account OAuth callback state mismatch"
+        raise TencentAccountQRLoginError(msg)
+    accept_callback = getattr(service, "accept_oauth_callback", None)
+    if not callable(accept_callback):
+        msg = "Tencent account OAuth callback file is not supported for this mode"
+        raise TencentAccountQRLoginError(msg)
+    accept_callback(state=state, code=code)
+    return True
+
+
+def _parse_tencent_oauth_callback_text(callback_text: str) -> tuple[str, str]:
+    if "\r" in callback_text or "\n" in callback_text:
+        msg = "Tencent account OAuth callback file is invalid"
+        raise TencentAccountQRLoginError(msg)
+    parsed = urlparse(callback_text)
+    query = parsed.query or parsed.fragment
+    if not query and "=" in callback_text:
+        query = callback_text
+    values = parse_qs(query, keep_blank_values=True)
+    code = _first_oauth_callback_value(values, "code")
+    state = _first_oauth_callback_value(values, "state")
+    if not code or not state:
+        msg = "Tencent account OAuth callback file is invalid"
+        raise TencentAccountQRLoginError(msg)
+    return code, state
+
+
+def _first_oauth_callback_value(values: dict[str, list[str]], name: str) -> str:
+    candidates = values.get(name, [])
+    if not candidates:
+        return ""
+    value = str(candidates[0] or "").strip()
+    if "\r" in value or "\n" in value:
+        msg = "Tencent account OAuth callback file is invalid"
+        raise TencentAccountQRLoginError(msg)
+    return value
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in text.splitlines():
+        normalized = line.strip()
+        if normalized:
+            return normalized
+    return ""
+
+
+def _remove_tencent_callback_url_file(callback_url_file: Path) -> None:
+    try:
+        callback_url_file.unlink(missing_ok=True)
+    except OSError as exc:
+        msg = "Tencent account OAuth callback file cleanup failed"
         raise TencentAccountQRLoginError(msg) from exc
 
 
