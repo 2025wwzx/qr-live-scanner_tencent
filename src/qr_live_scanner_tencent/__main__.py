@@ -8,6 +8,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import time
 import tomllib
 from contextlib import suppress
@@ -223,6 +224,7 @@ def _build_parser() -> argparse.ArgumentParser:
     tencent_login_parser.add_argument("--mock-confirm", action="store_true")
     tencent_login_parser.add_argument("--mock-uid")
     tencent_login_parser.add_argument("--qr-output", default="work/tencent-login-qr.png")
+    tencent_login_parser.add_argument("--open-qr", action="store_true")
     tencent_login_parser.add_argument("--protocol-config")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
@@ -1112,14 +1114,25 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
             provider,
             protocol_config_path=_optional_text(args.protocol_config),
         )
-        session = asyncio.run(
-            _capture_tencent_session_from_qr(
-                service,
-                qr_output_path=qr_output_path,
-                timeout_seconds=timeout_seconds,
-                poll_interval_seconds=poll_interval_seconds,
+        if bool(args.open_qr):
+            session = asyncio.run(
+                _capture_tencent_session_from_qr(
+                    service,
+                    qr_output_path=qr_output_path,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                    open_qr=True,
+                )
             )
-        )
+        else:
+            session = asyncio.run(
+                _capture_tencent_session_from_qr(
+                    service,
+                    qr_output_path=qr_output_path,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                )
+            )
         if session.provider is not provider:
             msg = "Tencent account provider mismatch"
             raise TencentAccountQRLoginError(msg)
@@ -1465,11 +1478,18 @@ async def _capture_tencent_session_from_qr(
     qr_output_path: Path,
     timeout_seconds: float,
     poll_interval_seconds: float,
+    open_qr: bool = False,
 ) -> TencentSession:
     try:
         ticket = await service.fetch_qr()
         service.write_qr_png(ticket, qr_output_path)
         print(f"Tencent account QR image written: {qr_output_path}")
+        if open_qr:
+            try:
+                _open_tencent_qr_png(qr_output_path)
+                print("Tencent account QR image opened")
+            except TencentAccountQRLoginError as exc:
+                print(f"[WARN] Tencent account QR image open failed: {exc}")
         deadline = time.monotonic() + timeout_seconds
         scanned_reported = False
         while time.monotonic() < deadline:
@@ -1513,6 +1533,25 @@ def _remove_tencent_qr_png(output_path: Path) -> None:
         output_path.unlink(missing_ok=True)
     except OSError as exc:
         msg = "Tencent account QR cleanup failed"
+        raise TencentAccountQRLoginError(msg) from exc
+
+
+def _open_tencent_qr_png(output_path: Path) -> None:
+    if not output_path.exists():
+        msg = "Tencent account QR image is missing"
+        raise TencentAccountQRLoginError(msg)
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(output_path)
+            return
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        subprocess.Popen(  # noqa: S603
+            [opener, str(output_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        msg = "Tencent account QR image could not be opened"
         raise TencentAccountQRLoginError(msg) from exc
 
 

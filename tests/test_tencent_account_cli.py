@@ -773,6 +773,85 @@ def test_tencent_login_cli_rejects_mismatched_provider_session(
     assert "SECRET_OPENID" not in output
 
 
+def test_tencent_login_cli_passes_open_qr_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    captured_open_flags: list[bool] = []
+
+    async def fake_capture(
+        service: object,
+        *,
+        qr_output_path: Path,
+        timeout_seconds: float,
+        poll_interval_seconds: float,
+        open_qr: bool = False,
+    ) -> TencentSession:
+        assert service is not None
+        assert qr_output_path == tmp_path / "tencent-login.png"
+        assert timeout_seconds == 3
+        assert poll_interval_seconds == 0.01
+        captured_open_flags.append(open_qr)
+        return TencentSession(
+            uid="10001",
+            provider=TencentLoginProvider.QQ,
+            credentials={"access_token": "SECRET_ACCESS_TOKEN", "openid": "SECRET_OPENID"},
+        )
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.saved: list[tuple[TencentSession, bool]] = []
+
+        def save_tencent_session(self, session: object, *, authorized: bool) -> None:
+            assert isinstance(session, TencentSession)
+            self.saved.append((session, authorized))
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return [
+                TencentAccountIndexEntry(
+                    uid=session.uid,
+                    provider=session.provider,
+                    authorized=authorized,
+                )
+                for session, authorized in self.saved
+            ]
+
+    monkeypatch.setattr(main_module, "_capture_tencent_session_from_qr", fake_capture)
+    monkeypatch.setattr(
+        main_module,
+        "_new_tencent_account_qr_login_service",
+        lambda _provider, **_kwargs: object(),
+    )
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(
+        [
+            "tencent-login",
+            "--provider",
+            "qq",
+            "--open-qr",
+            "--qr-output",
+            str(tmp_path / "tencent-login.png"),
+            "--timeout-seconds",
+            "3",
+            "--poll-interval-seconds",
+            "0.01",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured_open_flags == [True]
+    assert "Tencent account session saved" in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "10001" not in output
+
+
 def test_tencent_login_cli_scans_qr_and_saves_without_echoing_secrets(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1610,6 +1689,71 @@ async def test_tencent_login_cli_closes_service_when_qr_fetch_fails(tmp_path: Pa
         )
 
     assert closed == [True]
+
+
+async def test_tencent_login_capture_opens_qr_without_echoing_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    opened: list[Path] = []
+    closed: list[bool] = []
+
+    class FakeService:
+        async def fetch_qr(self) -> TencentAccountQRTicket:
+            return TencentAccountQRTicket(
+                provider=TencentLoginProvider.QQ,
+                app_id="test-app",
+                ticket="SECRET_TICKET",
+                qr_url="https://example.test/qq/qr?ticket=SECRET_TICKET",
+                device_id="0123456789abcdef0123456789abcdef",
+            )
+
+        async def query_qr(self, ticket: TencentAccountQRTicket) -> TencentAccountQRLoginStatus:
+            assert ticket.ticket == "SECRET_TICKET"
+            return TencentAccountQRLoginStatus(
+                provider=TencentLoginProvider.QQ,
+                state=TencentAccountQRLoginState.CONFIRMED,
+                session=TencentSession(
+                    uid="10001",
+                    provider=TencentLoginProvider.QQ,
+                    credentials={
+                        "access_token": "SECRET_ACCESS_TOKEN",
+                        "openid": "SECRET_OPENID",
+                    },
+                ),
+            )
+
+        def write_qr_png(self, ticket: TencentAccountQRTicket, output_path: Path) -> None:
+            assert ticket.ticket == "SECRET_TICKET"
+            output_path.write_bytes(b"PNG")
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    def fake_open(path: Path) -> None:
+        opened.append(path)
+
+    qr_path = tmp_path / "tencent-login.png"
+    monkeypatch.setattr(main_module, "_open_tencent_qr_png", fake_open)
+
+    session = await main_module._capture_tencent_session_from_qr(
+        FakeService(),
+        qr_output_path=qr_path,
+        timeout_seconds=1.0,
+        poll_interval_seconds=0.01,
+        open_qr=True,
+    )
+    output = capsys.readouterr().out
+
+    assert session.provider is TencentLoginProvider.QQ
+    assert opened == [qr_path]
+    assert closed == [True]
+    assert not qr_path.exists()
+    assert "Tencent account QR image opened" in output
+    assert "SECRET_TICKET" not in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "SECRET_OPENID" not in output
 
 
 def _run_main(argv: list[str]) -> int:

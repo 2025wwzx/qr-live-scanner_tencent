@@ -126,7 +126,8 @@ qr-live-scanner-tencent tencent-login-preflight `
 
 qr-live-scanner-tencent tencent-login `
   --provider qq `
-  --protocol-config profiles/tencent-account-login.toml
+  --protocol-config profiles/tencent-account-login.toml `
+  --open-qr
 ```
 
 The config loader rejects sensitive field names, sensitive `app_id` values,
