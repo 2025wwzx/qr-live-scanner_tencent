@@ -661,6 +661,13 @@ def _run_tencent_protocol_preflight(_args: argparse.Namespace) -> int:
         return 2
 
     sensitive_paths = ("captures/tencent-login.har", "profiles/tencent-account-login.toml")
+    tracked_paths = _git_tracked_paths(sensitive_paths)
+    if tracked_paths:
+        print("Tencent protocol preflight failed: sensitive paths are already tracked by git")
+        for path in tracked_paths:
+            print(f"- {path}")
+        return 2
+
     unignored_paths = _git_unignored_paths(sensitive_paths)
     if unignored_paths:
         print("Tencent protocol preflight failed: sensitive paths are not ignored by git")
@@ -696,6 +703,20 @@ def _git_unignored_paths(paths: tuple[str, ...]) -> list[str]:
         if result.returncode != 0:
             unignored_paths.append(path)
     return unignored_paths
+
+
+def _git_tracked_paths(paths: tuple[str, ...]) -> list[str]:
+    tracked_paths: list[str] = []
+    for path in paths:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", path],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode == 0:
+            tracked_paths.append(path)
+    return tracked_paths
 
 
 def _validate_har_shape(har: dict[str, object]) -> None:

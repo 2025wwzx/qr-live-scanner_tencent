@@ -23,7 +23,8 @@ Use this note when supplying local captures for Tencent protocol research.
 The useful redacted capture should preserve request ordering, URL path shape,
 method, status code, non-secret enum values, and JSON field names.
 The preflight command checks both the required `.gitignore` rules and Git's
-effective ignore result for sensitive capture/config paths.
+effective ignore result for sensitive capture/config paths. It also fails if
+those sensitive paths are already tracked by Git.
 The generated TOML skeleton keeps `validated_protocol = false` and must not
 contain Cookie, token, ticket, qrsig, UID, QR payload, query strings, or header
 values.

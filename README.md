@@ -39,7 +39,8 @@ python -m mypy
 `docs/tencent-protocol-research.md`。原始 HAR、Cookie、token 和二维码 payload
 不得提交到 git，也不要粘贴到聊天或 issue 中。
 `tencent-protocol-preflight` 会检查 `.gitignore` 和 Git 实际忽略结果，确认
-`captures/` 与 `profiles/` 下的敏感采样/配置路径不会被提交。
+`captures/` 与 `profiles/` 下的敏感采样/配置路径不会被提交；如果这些路径已经
+被 git 跟踪，preflight 会失败。
 
 ## Tencent Account QR Login
 

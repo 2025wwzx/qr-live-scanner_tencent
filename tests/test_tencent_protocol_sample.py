@@ -342,6 +342,31 @@ def test_protocol_preflight_cli_fails_when_git_ignore_is_negated(
     assert "ticket=" not in output.lower()
 
 
+def test_protocol_preflight_cli_fails_when_sensitive_path_is_already_tracked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("captures/\nprofiles/\n", encoding="utf-8")
+    capture_path = tmp_path / "captures" / "tencent-login.har"
+    capture_path.parent.mkdir(parents=True)
+    capture_path.write_text("SECRET_VALUE_DO_NOT_LEAK", encoding="utf-8")
+    subprocess.run(["git", "add", "-f", "captures/tencent-login.har"], cwd=tmp_path, check=True)
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = _run_main(["tencent-protocol-preflight"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol preflight failed" in output
+    assert "already tracked" in output
+    assert "captures/tencent-login.har" in output
+    assert "SECRET_VALUE_DO_NOT_LEAK" not in output
+    assert "cookie" not in output.lower()
+    assert "ticket=" not in output.lower()
+
+
 def test_protocol_note_renders_validation_checklist_without_values() -> None:
     sample = {
         "source": "redacted-har",
