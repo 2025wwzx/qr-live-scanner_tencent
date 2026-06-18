@@ -684,7 +684,8 @@ def test_account_qr_config_skeleton_infers_qq_qrconnect_mode() -> None:
     assert 'protocol_mode = "qq_qrconnect"' in skeleton
     assert 'fetch_url = "https://graph.qq.com/oauth2.0/authorize"' in skeleton
     assert 'query_url = "https://graph.qq.com/oauth2.0/token"' in skeleton
-    assert 'redirect_uri = "http://127.0.0.1:8765/qq/callback"' in skeleton
+    assert 'redirect_uri = "https://your-public-callback.example/qq/callback"' in skeleton
+    assert 'callback_bind_url = "http://127.0.0.1:8765/qq/callback"' in skeleton
     assert "?" not in skeleton
     assert "code=" not in skeleton
 
@@ -731,7 +732,10 @@ def test_account_qr_config_skeleton_infers_wechat_qrconnect_mode() -> None:
     assert 'protocol_mode = "wechat_qrconnect"' in skeleton
     assert 'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"' in skeleton
     assert 'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"' in skeleton
-    assert 'redirect_uri = "http://127.0.0.1:8766/wechat/callback"' in skeleton
+    assert (
+        'redirect_uri = "https://your-public-callback.example/wechat/callback"' in skeleton
+    )
+    assert 'callback_bind_url = "http://127.0.0.1:8766/wechat/callback"' in skeleton
     assert "?" not in skeleton
     assert "code=" not in skeleton
 
@@ -1061,6 +1065,7 @@ def test_protocol_artifact_check_cli_accepts_wechat_qrconnect_endpoint_names(
                 'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
                 'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
                 'redirect_uri = "https://login.example.test/wechat/callback"',
+                'callback_bind_url = "http://127.0.0.1:8766/wechat/callback"',
                 'app_id = "TODO-verified-app-id"',
                 "",
             ]
@@ -1084,6 +1089,7 @@ def test_protocol_artifact_check_cli_accepts_wechat_qrconnect_endpoint_names(
     assert "provider=wechat" in output
     assert "access_token" not in output
     assert "login.example.test" not in output
+    assert "127.0.0.1" not in output
 
 
 def test_protocol_artifact_check_cli_accepts_qq_qrconnect_endpoint_names(
@@ -1141,6 +1147,7 @@ def test_protocol_artifact_check_cli_accepts_qq_qrconnect_endpoint_names(
                 'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
                 'query_url = "https://graph.qq.com/oauth2.0/token"',
                 'redirect_uri = "https://login.example.test/qq/callback"',
+                'callback_bind_url = "http://127.0.0.1:8765/qq/callback"',
                 'app_id = "TODO-verified-app-id"',
                 "",
             ]
@@ -1164,6 +1171,7 @@ def test_protocol_artifact_check_cli_accepts_qq_qrconnect_endpoint_names(
     assert "provider=qq" in output
     assert "graph.qq.com" not in output
     assert "login.example.test" not in output
+    assert "127.0.0.1" not in output
 
 
 def test_protocol_readiness_cli_blocks_unchecked_validation_note(
@@ -1542,6 +1550,7 @@ def test_protocol_config_check_cli_accepts_qq_qrconnect_without_http_or_values(
                 'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
                 'query_url = "https://graph.qq.com/oauth2.0/token"',
                 'redirect_uri = "https://login.example.test/qq/callback"',
+                'callback_bind_url = "http://127.0.0.1:8765/qq/callback"',
                 'app_id = "verified-app"',
                 "",
             ]
@@ -1566,6 +1575,7 @@ def test_protocol_config_check_cli_accepts_qq_qrconnect_without_http_or_values(
     assert "real_http=not-called" in output
     assert "graph.qq.com" not in output
     assert "login.example.test" not in output
+    assert "127.0.0.1" not in output
     assert "verified-app" not in output
 
 
@@ -1583,6 +1593,7 @@ def test_protocol_config_check_cli_rejects_qq_qrconnect_for_wechat_without_value
                 'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
                 'query_url = "https://graph.qq.com/oauth2.0/token"',
                 'redirect_uri = "https://login.example.test/qq/callback"',
+                'callback_bind_url = "http://127.0.0.1:8765/qq/callback"',
                 'app_id = "verified-app"',
                 "",
             ]
@@ -1623,6 +1634,7 @@ def test_protocol_config_check_cli_accepts_wechat_qrconnect_without_http_or_valu
                 'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
                 'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
                 'redirect_uri = "https://login.example.test/wechat/callback"',
+                'callback_bind_url = "http://127.0.0.1:8766/wechat/callback"',
                 'app_id = "verified-app"',
                 "",
             ]
@@ -1648,6 +1660,7 @@ def test_protocol_config_check_cli_accepts_wechat_qrconnect_without_http_or_valu
     assert "open.weixin.qq.com" not in output
     assert "api.weixin.qq.com" not in output
     assert "login.example.test" not in output
+    assert "127.0.0.1" not in output
     assert "verified-app" not in output
 
 
@@ -1665,6 +1678,7 @@ def test_protocol_config_check_cli_rejects_wechat_qrconnect_for_qq_without_value
                 'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
                 'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
                 'redirect_uri = "https://login.example.test/wechat/callback"',
+                'callback_bind_url = "http://127.0.0.1:8766/wechat/callback"',
                 'app_id = "verified-app"',
                 "",
             ]

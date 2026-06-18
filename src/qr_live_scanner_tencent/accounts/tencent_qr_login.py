@@ -34,7 +34,15 @@ TENCENT_QQ_APP_SECRET_ENV = "QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET"
 TENCENT_WECHAT_APP_SECRET_ENV = "QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET"
 ACCOUNT_QR_LOGIN_CONFIG_SECTION = "account_qr_login"
 ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS = frozenset(
-    {"validated_protocol", "fetch_url", "query_url", "app_id", "protocol_mode", "redirect_uri"}
+    {
+        "validated_protocol",
+        "fetch_url",
+        "query_url",
+        "app_id",
+        "protocol_mode",
+        "redirect_uri",
+        "callback_bind_url",
+    }
 )
 ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS = frozenset(
     {
@@ -118,6 +126,7 @@ class TencentAccountQRLoginConfig:
     validated_protocol: bool = False
     protocol_mode: TencentAccountQRLoginProtocolMode = TencentAccountQRLoginProtocolMode.JSON_POST
     redirect_uri: str = ""
+    callback_bind_url: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "provider", TencentLoginProvider(str(self.provider)))
@@ -132,6 +141,15 @@ class TencentAccountQRLoginConfig:
             "redirect_uri",
             _redirect_uri_for_mode(self.protocol_mode, self.redirect_uri),
         )
+        object.__setattr__(
+            self,
+            "callback_bind_url",
+            _callback_bind_url_for_mode(
+                self.protocol_mode,
+                self.redirect_uri,
+                self.callback_bind_url,
+            ),
+        )
 
     def validated(
         self,
@@ -141,6 +159,7 @@ class TencentAccountQRLoginConfig:
         app_id: str,
         protocol_mode: TencentAccountQRLoginProtocolMode | str | None = None,
         redirect_uri: str | None = None,
+        callback_bind_url: str | None = None,
     ) -> TencentAccountQRLoginConfig:
         normalized_mode = (
             self.protocol_mode if protocol_mode is None else _protocol_mode(protocol_mode)
@@ -150,6 +169,11 @@ class TencentAccountQRLoginConfig:
             normalized_mode,
             redirect_uri if redirect_uri is not None else self.redirect_uri,
         )
+        normalized_callback_bind_url = _callback_bind_url_for_mode(
+            normalized_mode,
+            normalized_redirect_uri,
+            callback_bind_url if callback_bind_url is not None else self.callback_bind_url,
+        )
         return replace(
             self,
             fetch_url=_require_text(fetch_url, "Tencent account QR fetch URL is required"),
@@ -158,6 +182,7 @@ class TencentAccountQRLoginConfig:
             validated_protocol=True,
             protocol_mode=normalized_mode,
             redirect_uri=normalized_redirect_uri,
+            callback_bind_url=normalized_callback_bind_url,
         )
 
 
@@ -205,7 +230,7 @@ def load_tencent_account_qr_login_config(
         raise TencentAccountQRLoginError(msg)
 
     base_config = TencentAccountQRLoginService.default_configs()[normalized_provider]
-    return base_config.validated(
+    config = base_config.validated(
         fetch_url=_require_endpoint_url(provider_section.get("fetch_url")),
         query_url=_require_endpoint_url(provider_section.get("query_url")),
         app_id=_require_app_id(provider_section.get("app_id")),
@@ -220,7 +245,14 @@ def load_tencent_account_qr_login_config(
             if "redirect_uri" in provider_section
             else None
         ),
+        callback_bind_url=(
+            _require_callback_bind_url(provider_section.get("callback_bind_url"))
+            if "callback_bind_url" in provider_section
+            else None
+        ),
     )
+    _ensure_loadable_oauth_config_has_callback_bind_url(config)
+    return config
 
 
 @dataclass(frozen=True, slots=True)
@@ -567,7 +599,7 @@ class TencentAccountQRLoginService:
     async def _start_oauth_callback_server_if_local(self) -> None:
         if self.oauth_callback_server is not None:
             return
-        parsed = urlparse(self.config.redirect_uri)
+        parsed = urlparse(self.config.callback_bind_url or self.config.redirect_uri)
         host = str(parsed.hostname or "")
         if host not in {"127.0.0.1", "localhost", "::1"}:
             return
@@ -767,6 +799,49 @@ def _redirect_uri_for_mode(
     if redirect_uri is None:
         return ""
     return _require_redirect_uri(redirect_uri) if str(redirect_uri).strip() else ""
+
+
+def _callback_bind_url_for_mode(
+    protocol_mode: TencentAccountQRLoginProtocolMode,
+    redirect_uri: str,
+    callback_bind_url: str | None,
+) -> str:
+    if protocol_mode not in {
+        TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+        TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+    }:
+        if callback_bind_url is None:
+            return ""
+        return (
+            _require_callback_bind_url(callback_bind_url)
+            if str(callback_bind_url).strip()
+            else ""
+        )
+    if callback_bind_url is not None and str(callback_bind_url).strip():
+        return _require_callback_bind_url(callback_bind_url)
+    parsed = urlparse(redirect_uri)
+    host = str(parsed.hostname or "")
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return _require_callback_bind_url(redirect_uri)
+    return ""
+
+
+def _ensure_loadable_oauth_config_has_callback_bind_url(
+    config: TencentAccountQRLoginConfig,
+) -> None:
+    if config.protocol_mode not in {
+        TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+        TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+    }:
+        return
+    if config.callback_bind_url:
+        return
+    parsed = urlparse(config.redirect_uri)
+    host = str(parsed.hostname or "")
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return
+    msg = "Tencent account QR callback bind URL is required"
+    raise TencentAccountQRLoginError(msg)
 
 
 def _qq_ptlogin_fetch_params(app_id: str) -> dict[str, str]:
@@ -1264,6 +1339,31 @@ def _require_redirect_uri(value: object) -> str:
         msg = "Tencent account QR redirect URI must not include signed endpoint data"
         raise TencentAccountQRLoginError(msg)
     return redirect_uri
+
+
+def _require_callback_bind_url(value: object) -> str:
+    callback_bind_url = _require_text(value, "Tencent account QR callback bind URL is required")
+    if "\r" in callback_bind_url or "\n" in callback_bind_url:
+        msg = "Tencent account QR callback bind URL is invalid"
+        raise TencentAccountQRLoginError(msg)
+    parsed = urlparse(callback_bind_url)
+    if parsed.scheme != "http" or not parsed.netloc:
+        msg = "Tencent account QR callback bind URL is invalid"
+        raise TencentAccountQRLoginError(msg)
+    host = str(parsed.hostname or "")
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        msg = "Tencent account QR callback bind URL must be local"
+        raise TencentAccountQRLoginError(msg)
+    if parsed.port is None:
+        msg = "Tencent account QR callback bind URL port is required"
+        raise TencentAccountQRLoginError(msg)
+    if parsed.query or parsed.fragment:
+        msg = "Tencent account QR callback bind URL must not include signed endpoint data"
+        raise TencentAccountQRLoginError(msg)
+    if _endpoint_path_contains_sensitive_data(parsed.path):
+        msg = "Tencent account QR callback bind URL must not include signed endpoint data"
+        raise TencentAccountQRLoginError(msg)
+    return callback_bind_url
 
 
 def _endpoint_path_contains_sensitive_data(path: str) -> bool:

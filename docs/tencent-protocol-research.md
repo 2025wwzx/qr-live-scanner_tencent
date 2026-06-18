@@ -75,15 +75,18 @@ validated_protocol = true
 protocol_mode = "qq_qrconnect"
 fetch_url = "https://graph.qq.com/oauth2.0/authorize"
 query_url = "https://graph.qq.com/oauth2.0/token"
-redirect_uri = "http://127.0.0.1:8765/qq/callback"
+redirect_uri = "https://your-public-callback.example/qq/callback"
+callback_bind_url = "http://127.0.0.1:8765/qq/callback"
 app_id = "verified-qq-connect-app-id"
 ```
 
 `qq_qrconnect` renders the QQ Connect authorization URL as the QR payload. If
-`redirect_uri` points to `127.0.0.1`, `localhost`, or `::1`, the service starts
-a temporary local callback listener, captures `code` and `state` only in memory,
-then exchanges the code for a `TencentSession`. The QQ Connect app secret must
-be provided through the local environment variable
+`callback_bind_url` is present, the service starts a temporary local callback
+listener there while still sending the public `redirect_uri` to QQ Connect. The
+public callback or tunnel must forward to the same local path. The service
+captures `code` and `state` only in memory, then exchanges the code for a
+`TencentSession`. The QQ Connect app secret must be provided through the local
+environment variable
 `QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET`; never put it in TOML, docs, logs, or
 git.
 
@@ -95,18 +98,20 @@ validated_protocol = true
 protocol_mode = "wechat_qrconnect"
 fetch_url = "https://open.weixin.qq.com/connect/qrconnect"
 query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"
-redirect_uri = "http://127.0.0.1:8766/wechat/callback"
+redirect_uri = "https://your-public-callback.example/wechat/callback"
+callback_bind_url = "http://127.0.0.1:8766/wechat/callback"
 app_id = "verified-wechat-app-id"
 ```
 
 `wechat_qrconnect` renders the OAuth authorization URL as the QR payload. If
-`redirect_uri` points to `127.0.0.1`, `localhost`, or `::1`, the service starts
-a temporary local callback listener, captures `code` and `state` only in memory,
-then exchanges the code for a `TencentSession`. The WeChat app secret must be
-provided through the local environment variable
+`callback_bind_url` is present, the service starts a temporary local callback
+listener there while still sending the public `redirect_uri` to WeChat. The
+public callback or tunnel must forward to the same local path. The service
+captures `code` and `state` only in memory, then exchanges the code for a
+`TencentSession`. The WeChat app secret must be provided through the local
+environment variable
 `QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET`; never put it in TOML, docs, logs,
-or git. If the redirect URI is a public/tunnel URL, it must forward to the same
-local callback path for the CLI flow to finish.
+or git.
 
 Use it only with clean endpoint URLs:
 

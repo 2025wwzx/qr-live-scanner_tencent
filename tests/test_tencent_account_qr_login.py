@@ -85,7 +85,8 @@ def test_load_tencent_account_qr_login_config_accepts_qq_qrconnect_mode(
                 'protocol_mode = "qq_qrconnect"',
                 'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
                 'query_url = "https://graph.qq.com/oauth2.0/token"',
-                'redirect_uri = "https://login.example.test/qq/callback"',
+                'redirect_uri = "https://login.example.test/oauth/qq/callback"',
+                'callback_bind_url = "http://127.0.0.1:8765/qq/callback"',
                 'app_id = "qq-app"',
             ]
         ),
@@ -95,7 +96,8 @@ def test_load_tencent_account_qr_login_config_accepts_qq_qrconnect_mode(
     config = load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
 
     assert config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT
-    assert config.redirect_uri == "https://login.example.test/qq/callback"
+    assert config.redirect_uri == "https://login.example.test/oauth/qq/callback"
+    assert config.callback_bind_url == "http://127.0.0.1:8765/qq/callback"
 
 
 def test_load_tencent_account_qr_login_config_accepts_wechat_qrconnect_mode(
@@ -110,7 +112,8 @@ def test_load_tencent_account_qr_login_config_accepts_wechat_qrconnect_mode(
                 'protocol_mode = "wechat_qrconnect"',
                 'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
                 'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
-                'redirect_uri = "https://login.example.test/wechat/callback"',
+                'redirect_uri = "https://login.example.test/oauth/wechat/callback"',
+                'callback_bind_url = "http://127.0.0.1:8766/wechat/callback"',
                 'app_id = "wechat-app"',
             ]
         ),
@@ -120,7 +123,8 @@ def test_load_tencent_account_qr_login_config_accepts_wechat_qrconnect_mode(
     config = load_tencent_account_qr_login_config(config_path, TencentLoginProvider.WECHAT)
 
     assert config.protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT
-    assert config.redirect_uri == "https://login.example.test/wechat/callback"
+    assert config.redirect_uri == "https://login.example.test/oauth/wechat/callback"
+    assert config.callback_bind_url == "http://127.0.0.1:8766/wechat/callback"
 
 
 def test_load_tencent_account_qr_login_config_rejects_sensitive_fields_without_echo(
@@ -216,6 +220,57 @@ def test_load_tencent_account_qr_login_config_rejects_sensitive_app_id_without_e
         load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
 
     assert secret not in str(exc_info.value)
+
+
+def test_load_tencent_account_qr_login_config_rejects_public_callback_bind_url(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/qq/callback"',
+                'callback_bind_url = "http://login.example.test/qq/callback"',
+                'app_id = "qq-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TencentAccountQRLoginError, match="local") as exc_info:
+        load_tencent_account_qr_login_config(config_path, TencentLoginProvider.QQ)
+
+    assert "login.example.test" not in str(exc_info.value)
+
+
+def test_load_tencent_account_qr_login_config_requires_bind_for_public_redirect(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = true",
+                'protocol_mode = "wechat_qrconnect"',
+                'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
+                'redirect_uri = "https://login.example.test/wechat/callback"',
+                'app_id = "wechat-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TencentAccountQRLoginError, match="callback bind") as exc_info:
+        load_tencent_account_qr_login_config(config_path, TencentLoginProvider.WECHAT)
+
+    assert "login.example.test" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -639,6 +694,56 @@ async def test_tencent_account_qr_login_qq_qrconnect_local_callback_completes_lo
 
 
 @pytest.mark.asyncio
+async def test_tencent_account_qr_login_qq_qrconnect_tunnel_callback_bind_url(
+    monkeypatch: pytest.MonkeyPatch,
+    unused_tcp_port: int,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "SECRET_QQ_ACCESS_TOKEN",
+                "openid": "SECRET_QQ_OPENID",
+            },
+        )
+
+    public_redirect_uri = "https://login.example.test/oauth/qq/callback"
+    callback_bind_url = f"http://127.0.0.1:{unused_tcp_port}/qq/callback"
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", "SECRET_QQ_APP_SECRET")
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[TencentLoginProvider.QQ].validated(
+            fetch_url="https://graph.qq.com/oauth2.0/authorize",
+            query_url="https://graph.qq.com/oauth2.0/token",
+            redirect_uri=public_redirect_uri,
+            callback_bind_url=callback_bind_url,
+            app_id="qq-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.QQ_QRCONNECT,
+        ),
+    )
+
+    ticket = await service.fetch_qr()
+    async with httpx.AsyncClient(trust_env=False) as browser:
+        callback_response = await browser.get(
+            f"{callback_bind_url}?code=SECRET_QQ_CODE&state={ticket.ticket}"
+        )
+    status = await service.query_qr(ticket)
+
+    assert callback_response.status_code == 200
+    assert "redirect_uri=https%3A%2F%2Flogin.example.test%2Foauth%2Fqq%2Fcallback" in ticket.qr_url
+    assert status.state is TencentAccountQRLoginState.CONFIRMED
+    assert status.session is not None
+    assert status.session.uid == "SECRET_QQ_OPENID"
+    assert requests[0].url.params["redirect_uri"] == public_redirect_uri
+    assert "SECRET_QQ_CODE" not in callback_response.text
+    await service.aclose()
+
+
+@pytest.mark.asyncio
 async def test_tencent_account_qr_login_wechat_qrconnect_builds_authorize_qr_url() -> None:
     called = False
 
@@ -809,6 +914,61 @@ async def test_tencent_account_qr_login_wechat_qrconnect_local_callback_complete
     assert status.session is not None
     assert status.session.uid == "SECRET_WECHAT_OPENID"
     assert requests[0].url.params["code"] == "SECRET_WECHAT_CODE"
+    assert "SECRET_WECHAT_CODE" not in callback_response.text
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tencent_account_qr_login_wechat_qrconnect_tunnel_callback_bind_url(
+    monkeypatch: pytest.MonkeyPatch,
+    unused_tcp_port: int,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "SECRET_WECHAT_ACCESS_TOKEN",
+                "openid": "SECRET_WECHAT_OPENID",
+            },
+        )
+
+    public_redirect_uri = "https://login.example.test/oauth/wechat/callback"
+    callback_bind_url = f"http://127.0.0.1:{unused_tcp_port}/wechat/callback"
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET", "SECRET_APP_SECRET")
+    service = TencentAccountQRLoginService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        device_id_store=LocalDeviceIdStore.fixed("0123456789abcdef0123456789abcdef"),
+        config=TencentAccountQRLoginService.default_configs()[
+            TencentLoginProvider.WECHAT
+        ].validated(
+            fetch_url="https://open.weixin.qq.com/connect/qrconnect",
+            query_url="https://api.weixin.qq.com/sns/oauth2/access_token",
+            redirect_uri=public_redirect_uri,
+            callback_bind_url=callback_bind_url,
+            app_id="wechat-app",
+            protocol_mode=TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT,
+        ),
+    )
+
+    ticket = await service.fetch_qr()
+    async with httpx.AsyncClient(trust_env=False) as browser:
+        callback_response = await browser.get(
+            f"{callback_bind_url}?code=SECRET_WECHAT_CODE&state={ticket.ticket}"
+        )
+    status = await service.query_qr(ticket)
+
+    assert callback_response.status_code == 200
+    assert (
+        "redirect_uri=https%3A%2F%2Flogin.example.test%2Foauth%2Fwechat%2Fcallback"
+        in ticket.qr_url
+    )
+    assert status.state is TencentAccountQRLoginState.CONFIRMED
+    assert status.session is not None
+    assert status.session.uid == "SECRET_WECHAT_OPENID"
+    assert requests[0].url.params["appid"] == "wechat-app"
     assert "SECRET_WECHAT_CODE" not in callback_response.text
     await service.aclose()
 

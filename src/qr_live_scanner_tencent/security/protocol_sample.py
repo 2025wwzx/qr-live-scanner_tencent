@@ -296,6 +296,10 @@ def render_tencent_account_qr_config_skeleton(sample: dict[str, Any]) -> str:
         query_url=query_url,
     )
     redirect_uri = _account_config_redirect_uri(provider=provider, protocol_mode=protocol_mode)
+    callback_bind_url = _account_config_callback_bind_url(
+        provider=provider,
+        protocol_mode=protocol_mode,
+    )
 
     lines = [
         f"[account_qr_login.{provider.value}]",
@@ -311,6 +315,8 @@ def render_tencent_account_qr_config_skeleton(sample: dict[str, Any]) -> str:
     )
     if redirect_uri:
         lines.append(f'redirect_uri = "{_toml_string(redirect_uri)}"')
+    if callback_bind_url:
+        lines.append(f'callback_bind_url = "{_toml_string(callback_bind_url)}"')
     lines.extend(
         [
             f'app_id = "{ACCOUNT_QR_CONFIG_SKELETON_APP_ID}"',
@@ -452,6 +458,8 @@ def _validate_account_qr_config_provider_artifact(
     _validate_artifact_endpoint_url(provider_section.get("query_url"))
     if "redirect_uri" in provider_section:
         _validate_artifact_endpoint_url(provider_section.get("redirect_uri"))
+    if "callback_bind_url" in provider_section:
+        _validate_artifact_endpoint_url(provider_section.get("callback_bind_url"))
     _validate_artifact_app_id(
         _required_text(provider_section.get("app_id"), "protocol config app id is required"),
     )
@@ -735,6 +743,24 @@ def _account_config_protocol_mode(
 
 
 def _account_config_redirect_uri(
+    *,
+    provider: TencentLoginProvider,
+    protocol_mode: TencentAccountQRLoginProtocolMode | None,
+) -> str:
+    if (
+        provider is TencentLoginProvider.QQ
+        and protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT
+    ):
+        return "https://your-public-callback.example/qq/callback"
+    if (
+        provider is TencentLoginProvider.WECHAT
+        and protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT
+    ):
+        return "https://your-public-callback.example/wechat/callback"
+    return ""
+
+
+def _account_config_callback_bind_url(
     *,
     provider: TencentLoginProvider,
     protocol_mode: TencentAccountQRLoginProtocolMode | None,
