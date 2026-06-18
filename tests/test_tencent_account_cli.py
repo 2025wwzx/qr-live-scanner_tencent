@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import httpx
 import pytest
 
 import qr_live_scanner_tencent.__main__ as main_module
@@ -45,6 +46,97 @@ def test_tencent_login_cli_dry_run_writes_demo_qr_without_echoing_secrets(
     assert "cookie" not in output.lower()
     assert "ticket" not in output.lower()
     assert "payload" not in output.lower()
+
+
+def test_tencent_login_cli_dry_run_rejects_invalid_protocol_config(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "tencent-login.png"
+    config_path = tmp_path / "tencent-account-login.toml"
+    secret = "SECRET_TICKET_VALUE_DO_NOT_LEAK"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                f'fetch_url = "https://example.test/qq/fetch?ticket={secret}"',
+                'query_url = "https://example.test/qq/query"',
+                'app_id = "verified-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-login",
+            "--provider",
+            "qq",
+            "--dry-run",
+            "--protocol-config",
+            str(config_path),
+            "--qr-output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert not output_path.exists()
+    assert "Tencent account QR login failed" in output
+    assert "endpoint" in output.lower()
+    assert secret not in output
+    assert "example.test" not in output
+    assert "verified-app" not in output
+
+
+def test_tencent_login_cli_dry_run_checks_protocol_config_without_http(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "tencent-login.png"
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = true",
+                'fetch_url = "https://example.test/wechat/fetch"',
+                'query_url = "https://example.test/wechat/query"',
+                'app_id = "verified-wechat-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_if_http_client_is_created(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("dry-run protocol config check must not create HTTP client")
+
+    monkeypatch.setattr(httpx, "AsyncClient", fail_if_http_client_is_created)
+
+    exit_code = _run_main(
+        [
+            "tencent-login",
+            "--provider",
+            "wechat",
+            "--dry-run",
+            "--protocol-config",
+            str(config_path),
+            "--qr-output",
+            str(output_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert output_path.exists()
+    assert output_path.read_bytes().startswith(b"\x89PNG")
+    assert "Tencent protocol config checked" in output
+    assert "Tencent account login dry-run ready" in output
+    assert "example.test" not in output
+    assert "verified-wechat-app" not in output
 
 
 def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(

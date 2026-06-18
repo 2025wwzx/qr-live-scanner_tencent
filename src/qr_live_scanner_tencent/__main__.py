@@ -940,6 +940,10 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
             )
 
         if bool(args.dry_run):
+            protocol_config_path = _optional_text(args.protocol_config)
+            if protocol_config_path is not None:
+                load_tencent_account_qr_login_config(protocol_config_path, provider)
+                print(f"Tencent protocol config checked: provider={provider.value}")
             service = TencentAccountQRLoginService.dry_run(
                 provider=provider,
                 device_id_store=LocalDeviceIdStore.default(),

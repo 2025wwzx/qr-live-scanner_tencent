@@ -60,6 +60,15 @@ class TencentAccountQRLoginError(Exception):
     """Tencent 账号二维码登录失败；错误信息不得包含凭据、账号 ID 或二维码原文。"""
 
 
+class _TencentAccountQRDryRunClient:
+    async def post(self, _url: str, **_kwargs: Any) -> httpx.Response:
+        msg = "Tencent account QR dry-run client cannot perform HTTP"
+        raise TencentAccountQRLoginError(msg)
+
+    async def aclose(self) -> None:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class TencentAccountQRLoginConfig:
     """腾讯账号二维码登录通道配置。
@@ -203,7 +212,7 @@ class TencentAccountQRLoginService:
     `httpx.MockTransport` 注入响应。
     """
 
-    client: httpx.AsyncClient
+    client: httpx.AsyncClient | _TencentAccountQRDryRunClient
     device_id_store: LocalDeviceIdStore
     config: TencentAccountQRLoginConfig
 
@@ -345,7 +354,11 @@ class TencentAccountQRLoginService:
         device_id_store: LocalDeviceIdStore,
     ) -> TencentAccountQRLoginService:
         config = cls.default_configs()[TencentLoginProvider(str(provider))]
-        return cls(client=httpx.AsyncClient(), device_id_store=device_id_store, config=config)
+        return cls(
+            client=_TencentAccountQRDryRunClient(),
+            device_id_store=device_id_store,
+            config=config,
+        )
 
     @staticmethod
     def default_configs() -> dict[TencentLoginProvider, TencentAccountQRLoginConfig]:
