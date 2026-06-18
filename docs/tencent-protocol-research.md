@@ -52,6 +52,10 @@ app_id = "verified-app-id"
 Use it only with clean endpoint URLs:
 
 ```powershell
+qr-live-scanner-tencent tencent-protocol-config-check `
+  --provider qq `
+  --config profiles/tencent-account-login.toml
+
 qr-live-scanner-tencent tencent-login `
   --provider qq `
   --protocol-config profiles/tencent-account-login.toml
@@ -61,6 +65,8 @@ The config loader rejects sensitive field names, sensitive `app_id` values,
 endpoint URLs with query strings or fragments, and sensitive endpoint path segments.
 Do not place Cookie, token, ticket, openid, uid, QR payload,
 credentials, session data, or signed URLs in this file.
+The config check is read-only and reports `real_http=not-called`; it does not
+create a QR ticket or contact Tencent.
 
 ## Required Validation
 

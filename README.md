@@ -199,6 +199,7 @@ app_id = "your-app-id"
 ```
 
 ```powershell
+qr-live-scanner-tencent tencent-protocol-config-check --provider qq --config .\profiles\tencent-account-login.toml
 qr-live-scanner-tencent tencent-login --provider qq --protocol-config .\profiles\tencent-account-login.toml
 ```
 

@@ -1045,6 +1045,84 @@ def test_protocol_readiness_cli_rejects_sensitive_note_values_without_echoing_va
     assert secret not in output
 
 
+def test_protocol_config_check_cli_accepts_validated_config_without_http_or_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'fetch_url = "https://example.test/qq/fetch"',
+                'query_url = "https://example.test/qq/query"',
+                'app_id = "verified-app"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-check",
+            "--config",
+            str(config_path),
+            "--provider",
+            "qq",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol config check passed" in output
+    assert "provider=qq" in output
+    assert "validated_protocol=true" in output
+    assert "real_http=not-called" in output
+    assert "example.test" not in output
+    assert "verified-app" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+
+
+def test_protocol_config_check_cli_rejects_unsafe_config_without_echoing_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "SECRET_TOKEN_VALUE_DO_NOT_LEAK"
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                f'fetch_url = "https://example.test/qq/fetch?token={secret}"',
+                'query_url = "https://example.test/qq/query"',
+                'app_id = "verified-app"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-check",
+            "--config",
+            str(config_path),
+            "--provider",
+            "qq",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol config check failed" in output
+    assert "endpoint" in output.lower()
+    assert secret not in output
+
+
 def _write_safe_protocol_sample(path: Path) -> None:
     path.write_text(
         json.dumps(

@@ -91,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_protocol_note(args)
     if args.command == "tencent-protocol-config-skeleton":
         return _run_tencent_protocol_config_skeleton(args)
+    if args.command == "tencent-protocol-config-check":
+        return _run_tencent_protocol_config_check(args)
     if args.command == "tencent-protocol-artifact-check":
         return _run_tencent_protocol_artifact_check(args)
     if args.command == "tencent-protocol-readiness":
@@ -271,6 +273,14 @@ def _build_parser() -> argparse.ArgumentParser:
     protocol_config_parser = subparsers.add_parser("tencent-protocol-config-skeleton")
     protocol_config_parser.add_argument("--input", required=True)
     protocol_config_parser.add_argument("--output", required=True)
+
+    protocol_config_check_parser = subparsers.add_parser("tencent-protocol-config-check")
+    protocol_config_check_parser.add_argument("--config", required=True)
+    protocol_config_check_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
 
     protocol_artifact_check_parser = subparsers.add_parser("tencent-protocol-artifact-check")
     protocol_artifact_check_parser.add_argument("--sample", required=True)
@@ -620,6 +630,30 @@ def _run_tencent_protocol_config_skeleton(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent protocol config skeleton rendering failed: {exc}")
         return 2
     print(f"Tencent protocol config skeleton written: {output_path}")
+    return 0
+
+
+def _run_tencent_protocol_config_check(args: argparse.Namespace) -> int:
+    config_path = Path(str(args.config))
+    try:
+        provider = TencentLoginProvider(str(args.provider))
+        config = load_tencent_account_qr_login_config(config_path, provider)
+    except (OSError, ValueError, TencentAccountQRLoginError) as exc:
+        print(f"[WARN] Tencent protocol config check failed: {exc}")
+        return 2
+
+    print("Tencent protocol config check passed")
+    print(
+        " ".join(
+            [
+                f"provider={config.provider.value}",
+                f"validated_protocol={str(config.validated_protocol).lower()}",
+                "endpoints=2",
+                "app_id=present",
+                "real_http=not-called",
+            ]
+        )
+    )
     return 0
 
 

@@ -12,6 +12,7 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "tencent-protocol-guide --provider qq" in readme
     assert "tencent-protocol-artifact-check" in readme
     assert "tencent-protocol-readiness" in readme
+    assert "tencent-protocol-config-check" in readme
     assert "rejects unsafe sample/config edits" in readme
     assert "rejects signed URLs or sensitive assignments" in readme
     assert "real_http=disabled" in readme
@@ -78,7 +79,9 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     )
     assert "tencent-protocol-artifact-check" in protocol_research
     assert "tencent-protocol-readiness" in protocol_research
+    assert "tencent-protocol-config-check" in protocol_research
     assert "`real_http=disabled`" in protocol_research
+    assert "`real_http=not-called`" in protocol_research
     assert "sensitive assignments such as `ticket=` or `Cookie:`" in protocol_research
     assert "sensitive `app_id` values" in protocol_research
     assert "sensitive endpoint path segments" in protocol_research
