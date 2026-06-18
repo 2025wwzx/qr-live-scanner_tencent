@@ -113,11 +113,17 @@ def load_tencent_account_qr_login_config(
     normalized_provider = TencentLoginProvider(str(provider))
     section = data.get(ACCOUNT_QR_LOGIN_CONFIG_SECTION)
     if not isinstance(section, dict):
-        msg = "Tencent account QR config section is missing"
+        msg = (
+            "Tencent account QR config section is missing "
+            f"for provider={normalized_provider.value}"
+        )
         raise TencentAccountQRLoginError(msg)
     provider_section = section.get(normalized_provider.value)
     if not isinstance(provider_section, dict):
-        msg = "Tencent account QR provider config is missing"
+        msg = (
+            "Tencent account QR provider config is missing "
+            f"for provider={normalized_provider.value}"
+        )
         raise TencentAccountQRLoginError(msg)
 
     unknown_fields = set(provider_section) - ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS
