@@ -85,6 +85,12 @@ Record these fields before enabling real confirm:
 ## Sanitized HAR Workflow
 
 Export raw HAR only to an ignored local path such as `captures/tencent-login.har`.
+For a copy-ready command list, run:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-next-steps --provider qq
+```
+
 Then run:
 
 ```powershell

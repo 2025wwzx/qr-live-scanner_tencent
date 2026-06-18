@@ -53,6 +53,7 @@ or QR payload:
 ```powershell
 qr-live-scanner-tencent tencent-protocol-preflight
 qr-live-scanner-tencent tencent-protocol-guide --provider qq
+qr-live-scanner-tencent tencent-protocol-next-steps --provider qq
 qr-live-scanner-tencent tencent-protocol-sample --input captures/tencent-login.redacted.har --output captures/tencent-login.sample.json --provider qq --flow account-login
 qr-live-scanner-tencent tencent-protocol-note --input captures/tencent-login.sample.json --output captures/tencent-login.note.md
 qr-live-scanner-tencent tencent-protocol-config-skeleton --input captures/tencent-login.sample.json --output profiles/tencent-account-login.toml
@@ -80,6 +81,10 @@ qr-live-scanner-tencent tencent-protocol-example-check
 qr-live-scanner-tencent tencent-protocol-artifact-check --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json --config examples/tencent-protocol-research-pack/qq-account-login.toml
 qr-live-scanner-tencent tencent-protocol-readiness --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json --config examples/tencent-protocol-research-pack/qq-account-login.toml --note examples/tencent-protocol-research-pack/qq-account-login.note.md
 ```
+
+Use `qr-live-scanner-tencent tencent-protocol-next-steps --provider qq` or
+`--provider wechat` when you want the copy-ready command list for a real local
+capture session.
 
 已新增独立账号登录链路：`tencent-login` 会由本项目生成 QQ/微信账号登录二维码，
 确认成功后将 `TencentSession` 保存到本地 keyring 的 `qr-live-scanner-tencent`

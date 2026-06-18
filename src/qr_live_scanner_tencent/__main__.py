@@ -105,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_protocol_readiness(args)
     if args.command == "tencent-protocol-guide":
         return _run_tencent_protocol_guide(args)
+    if args.command == "tencent-protocol-next-steps":
+        return _run_tencent_protocol_next_steps(args)
     if args.command == "tencent-protocol-preflight":
         return _run_tencent_protocol_preflight(args)
     if args.command == "gui":
@@ -301,6 +303,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     protocol_guide_parser = subparsers.add_parser("tencent-protocol-guide")
     protocol_guide_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+
+    protocol_next_steps_parser = subparsers.add_parser("tencent-protocol-next-steps")
+    protocol_next_steps_parser.add_argument(
         "--provider",
         choices=[provider.value for provider in TencentLoginProvider],
         default=TencentLoginProvider.QQ.value,
@@ -862,6 +871,56 @@ def _run_tencent_protocol_guide(args: argparse.Namespace) -> int:
     print("9. Inspect only the redacted HAR, sample JSON, note, and TOML skeleton.")
     print("10. Keep validated_protocol = false until endpoints and response rules are verified.")
     return 0
+
+
+def _run_tencent_protocol_next_steps(args: argparse.Namespace) -> int:
+    provider = TencentLoginProvider(str(args.provider))
+    print("Tencent protocol next steps")
+    print(f"provider={provider.value} flow=account-login real_http=disabled")
+    for command in _tencent_protocol_next_step_commands(provider):
+        print(command)
+    print("Keep validated_protocol = false until endpoints and response rules are verified.")
+    return 0
+
+
+def _tencent_protocol_next_step_commands(provider: TencentLoginProvider) -> tuple[str, ...]:
+    return (
+        "qr-live-scanner-tencent tencent-protocol-example-check",
+        "qr-live-scanner-tencent tencent-protocol-preflight",
+        (
+            "qr-live-scanner-tencent redact-har "
+            "--input captures/tencent-login.har "
+            "--output captures/tencent-login.redacted.har"
+        ),
+        (
+            "qr-live-scanner-tencent tencent-protocol-sample "
+            "--input captures/tencent-login.redacted.har "
+            "--output captures/tencent-login.sample.json "
+            f"--provider {provider.value} "
+            "--flow account-login"
+        ),
+        (
+            "qr-live-scanner-tencent tencent-protocol-note "
+            "--input captures/tencent-login.sample.json "
+            "--output captures/tencent-login.note.md"
+        ),
+        (
+            "qr-live-scanner-tencent tencent-protocol-config-skeleton "
+            "--input captures/tencent-login.sample.json "
+            "--output profiles/tencent-account-login.toml"
+        ),
+        (
+            "qr-live-scanner-tencent tencent-protocol-artifact-check "
+            "--sample captures/tencent-login.sample.json "
+            "--config profiles/tencent-account-login.toml"
+        ),
+        (
+            "qr-live-scanner-tencent tencent-protocol-readiness "
+            "--sample captures/tencent-login.sample.json "
+            "--config profiles/tencent-account-login.toml "
+            "--note captures/tencent-login.note.md"
+        ),
+    )
 
 
 def _run_tencent_protocol_preflight(_args: argparse.Namespace) -> int:

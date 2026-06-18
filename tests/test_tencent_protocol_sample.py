@@ -277,6 +277,34 @@ def test_protocol_guide_cli_prints_safe_capture_workflow_without_secrets(
     assert "ticket=" not in lower_output
 
 
+def test_protocol_next_steps_cli_prints_copy_ready_provider_workflow(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = _run_main(["tencent-protocol-next-steps", "--provider", "wechat"])
+    output = capsys.readouterr().out
+    lower_output = output.lower()
+
+    assert exit_code == 0
+    assert "Tencent protocol next steps" in output
+    assert "provider=wechat" in output
+    assert "real_http=disabled" in output
+    assert "qr-live-scanner-tencent tencent-protocol-example-check" in output
+    assert "qr-live-scanner-tencent tencent-protocol-preflight" in output
+    assert "qr-live-scanner-tencent redact-har" in output
+    assert "--provider wechat" in output
+    assert "--flow account-login" in output
+    assert "tencent-protocol-artifact-check" in output
+    assert "tencent-protocol-readiness" in output
+    assert "validated_protocol = false" in output
+    assert "SECRET_VALUE_DO_NOT_LEAK" not in output
+    assert "local-wechat-user" not in output
+    assert "cookie:" not in lower_output
+    assert "authorization:" not in lower_output
+    assert "openid=" not in lower_output
+    assert "qrsig=" not in lower_output
+    assert "ticket=" not in lower_output
+
+
 def test_protocol_preflight_cli_verifies_sensitive_paths_are_ignored(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
