@@ -29,6 +29,13 @@ jobs:
       - name: Install package
         run: python -m pip install -e .[dev]
 
+      - name: Run CLI smoke checks
+        run: |
+          qr-live-scanner-tencent gui --dry-run
+          qr-live-scanner-tencent tencent-protocol-preflight
+          qr-live-scanner-tencent tencent-protocol-example-check
+          qr-live-scanner-tencent tencent-protocol-next-steps --provider qq
+
       - name: Run tests
         run: python -m pytest
 
