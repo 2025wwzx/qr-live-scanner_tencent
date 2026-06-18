@@ -87,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_protocol_note(args)
     if args.command == "tencent-protocol-config-skeleton":
         return _run_tencent_protocol_config_skeleton(args)
+    if args.command == "tencent-protocol-guide":
+        return _run_tencent_protocol_guide(args)
     if args.command == "gui":
         return _run_gui(args)
     if args.command == "gui-snapshot":
@@ -259,6 +261,13 @@ def _build_parser() -> argparse.ArgumentParser:
     protocol_config_parser = subparsers.add_parser("tencent-protocol-config-skeleton")
     protocol_config_parser.add_argument("--input", required=True)
     protocol_config_parser.add_argument("--output", required=True)
+
+    protocol_guide_parser = subparsers.add_parser("tencent-protocol-guide")
+    protocol_guide_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
     return parser
 
 
@@ -590,6 +599,41 @@ def _run_tencent_protocol_config_skeleton(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent protocol config skeleton rendering failed: {exc}")
         return 2
     print(f"Tencent protocol config skeleton written: {output_path}")
+    return 0
+
+
+def _run_tencent_protocol_guide(args: argparse.Namespace) -> int:
+    provider = TencentLoginProvider(str(args.provider))
+    print("Safe Tencent protocol capture workflow")
+    print(f"provider: {provider.value}")
+    print(
+        "Do not share raw HAR, Cookie, Authorization, token, openid, "
+        "qrsig, ticket, UID, or QR URL."
+    )
+    print("1. Export the local browser capture to captures/tencent-login.har")
+    print(
+        "2. qr-live-scanner-tencent redact-har "
+        "--input captures/tencent-login.har "
+        "--output captures/tencent-login.redacted.har"
+    )
+    print(
+        "3. qr-live-scanner-tencent tencent-protocol-sample "
+        "--input captures/tencent-login.redacted.har "
+        "--output captures/tencent-login.sample.json "
+        f"--provider {provider.value} --flow account-login"
+    )
+    print(
+        "4. qr-live-scanner-tencent tencent-protocol-note "
+        "--input captures/tencent-login.sample.json "
+        "--output captures/tencent-login.note.md"
+    )
+    print(
+        "5. qr-live-scanner-tencent tencent-protocol-config-skeleton "
+        "--input captures/tencent-login.sample.json "
+        "--output profiles/tencent-account-login.toml"
+    )
+    print("6. Inspect only the redacted HAR, sample JSON, note, and TOML skeleton.")
+    print("7. Keep validated_protocol = false until endpoints and response rules are verified.")
     return 0
 
 

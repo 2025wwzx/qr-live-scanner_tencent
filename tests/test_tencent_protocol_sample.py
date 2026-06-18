@@ -248,6 +248,32 @@ def test_protocol_sample_cli_rejects_raw_har_without_writing_output(
     assert secret not in output
 
 
+def test_protocol_guide_cli_prints_safe_capture_workflow_without_secrets(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = _run_main(["tencent-protocol-guide", "--provider", "wechat"])
+    output = capsys.readouterr().out
+    lower_output = output.lower()
+
+    assert exit_code == 0
+    assert "Safe Tencent protocol capture workflow" in output
+    assert "provider: wechat" in output
+    assert "captures/tencent-login.har" in output
+    assert "redact-har" in output
+    assert "tencent-protocol-sample" in output
+    assert "tencent-protocol-note" in output
+    assert "tencent-protocol-config-skeleton" in output
+    assert "validated_protocol = false" in output
+    assert "Do not share raw HAR" in output
+    assert "SECRET_VALUE_DO_NOT_LEAK" not in output
+    assert "local-wechat-user" not in output
+    assert "cookie:" not in lower_output
+    assert "authorization:" not in lower_output
+    assert "openid=" not in lower_output
+    assert "qrsig=" not in lower_output
+    assert "ticket=" not in lower_output
+
+
 def test_protocol_note_renders_validation_checklist_without_values() -> None:
     sample = {
         "source": "redacted-har",
