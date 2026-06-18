@@ -57,9 +57,10 @@ qr-live-scanner-tencent tencent-login `
   --protocol-config profiles/tencent-account-login.toml
 ```
 
-The config loader rejects sensitive field names and endpoint URLs with query
-strings or fragments. Do not place Cookie, token, ticket, openid, uid, QR
-payload, credentials, session data, or signed URLs in this file.
+The config loader rejects sensitive field names, endpoint URLs with query
+strings or fragments, and sensitive endpoint path segments. Do not place Cookie,
+token, ticket, openid, uid, QR payload, credentials, session data, or signed
+URLs in this file.
 
 ## Required Validation
 

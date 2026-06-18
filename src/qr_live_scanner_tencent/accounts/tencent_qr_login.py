@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 import qrcode
@@ -488,7 +488,29 @@ def _require_endpoint_url(value: object) -> str:
     if parsed.query or parsed.fragment:
         msg = "Tencent account QR endpoint URL must not include signed endpoint data"
         raise TencentAccountQRLoginError(msg)
+    if _endpoint_path_contains_sensitive_data(parsed.path):
+        msg = "Tencent account QR endpoint URL must not include signed endpoint data"
+        raise TencentAccountQRLoginError(msg)
     return endpoint_url
+
+
+def _endpoint_path_contains_sensitive_data(path: str) -> bool:
+    for segment in path.split("/"):
+        decoded = unquote(segment).strip().lower()
+        if not decoded:
+            continue
+        if any(fragment in decoded for fragment in ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS):
+            return True
+        if decoded.isdigit() and len(decoded) >= 5:
+            return True
+        compact = decoded.translate(str.maketrans("", "", "-_.~"))
+        if (
+            len(compact) >= 16
+            and any(char.isalpha() for char in compact)
+            and any(char.isdigit() for char in compact)
+        ):
+            return True
+    return False
 
 
 def _require_text(value: object, message: str) -> str:
