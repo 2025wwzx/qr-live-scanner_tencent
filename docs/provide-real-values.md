@@ -10,14 +10,15 @@ Use this note when supplying local captures for Tencent protocol research.
 
 ## Safe Workflow
 
-1. Run `qr-live-scanner-tencent tencent-protocol-guide --provider qq` or `--provider wechat`.
-2. Export the capture to `captures/tencent-login.har`.
-3. Run `qr-live-scanner-tencent redact-har --input captures/tencent-login.har --output captures/tencent-login.redacted.har`.
-4. Run `qr-live-scanner-tencent tencent-protocol-sample --input captures/tencent-login.redacted.har --output captures/tencent-login.sample.json --provider qq --flow account-login`.
-5. Run `qr-live-scanner-tencent tencent-protocol-note --input captures/tencent-login.sample.json --output captures/tencent-login.note.md`.
-6. Run `qr-live-scanner-tencent tencent-protocol-config-skeleton --input captures/tencent-login.sample.json --output profiles/tencent-account-login.toml`.
-7. Inspect only the redacted HAR, generated sample summary, generated note, and generated TOML skeleton.
-8. Keep the raw file ignored by git.
+1. Run `qr-live-scanner-tencent tencent-protocol-preflight`.
+2. Run `qr-live-scanner-tencent tencent-protocol-guide --provider qq` or `--provider wechat`.
+3. Export the capture to `captures/tencent-login.har`.
+4. Run `qr-live-scanner-tencent redact-har --input captures/tencent-login.har --output captures/tencent-login.redacted.har`.
+5. Run `qr-live-scanner-tencent tencent-protocol-sample --input captures/tencent-login.redacted.har --output captures/tencent-login.sample.json --provider qq --flow account-login`.
+6. Run `qr-live-scanner-tencent tencent-protocol-note --input captures/tencent-login.sample.json --output captures/tencent-login.note.md`.
+7. Run `qr-live-scanner-tencent tencent-protocol-config-skeleton --input captures/tencent-login.sample.json --output profiles/tencent-account-login.toml`.
+8. Inspect only the redacted HAR, generated sample summary, generated note, and generated TOML skeleton.
+9. Keep the raw file ignored by git.
 
 The useful redacted capture should preserve request ordering, URL path shape,
 method, status code, non-secret enum values, and JSON field names.

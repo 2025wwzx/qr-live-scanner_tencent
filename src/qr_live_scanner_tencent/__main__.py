@@ -89,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tencent_protocol_config_skeleton(args)
     if args.command == "tencent-protocol-guide":
         return _run_tencent_protocol_guide(args)
+    if args.command == "tencent-protocol-preflight":
+        return _run_tencent_protocol_preflight(args)
     if args.command == "gui":
         return _run_gui(args)
     if args.command == "gui-snapshot":
@@ -268,6 +270,8 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=[provider.value for provider in TencentLoginProvider],
         default=TencentLoginProvider.QQ.value,
     )
+
+    subparsers.add_parser("tencent-protocol-preflight")
     return parser
 
 
@@ -610,31 +614,65 @@ def _run_tencent_protocol_guide(args: argparse.Namespace) -> int:
         "Do not share raw HAR, Cookie, Authorization, token, openid, "
         "qrsig, ticket, UID, or QR URL."
     )
-    print("1. Export the local browser capture to captures/tencent-login.har")
+    print("1. qr-live-scanner-tencent tencent-protocol-preflight")
+    print("2. Export the local browser capture to captures/tencent-login.har")
     print(
-        "2. qr-live-scanner-tencent redact-har "
+        "3. qr-live-scanner-tencent redact-har "
         "--input captures/tencent-login.har "
         "--output captures/tencent-login.redacted.har"
     )
     print(
-        "3. qr-live-scanner-tencent tencent-protocol-sample "
+        "4. qr-live-scanner-tencent tencent-protocol-sample "
         "--input captures/tencent-login.redacted.har "
         "--output captures/tencent-login.sample.json "
         f"--provider {provider.value} --flow account-login"
     )
     print(
-        "4. qr-live-scanner-tencent tencent-protocol-note "
+        "5. qr-live-scanner-tencent tencent-protocol-note "
         "--input captures/tencent-login.sample.json "
         "--output captures/tencent-login.note.md"
     )
     print(
-        "5. qr-live-scanner-tencent tencent-protocol-config-skeleton "
+        "6. qr-live-scanner-tencent tencent-protocol-config-skeleton "
         "--input captures/tencent-login.sample.json "
         "--output profiles/tencent-account-login.toml"
     )
-    print("6. Inspect only the redacted HAR, sample JSON, note, and TOML skeleton.")
-    print("7. Keep validated_protocol = false until endpoints and response rules are verified.")
+    print("7. Inspect only the redacted HAR, sample JSON, note, and TOML skeleton.")
+    print("8. Keep validated_protocol = false until endpoints and response rules are verified.")
     return 0
+
+
+def _run_tencent_protocol_preflight(_args: argparse.Namespace) -> int:
+    gitignore_path = Path(".gitignore")
+    try:
+        gitignore_text = gitignore_path.read_text(encoding="utf-8")
+    except OSError:
+        print("Tencent protocol preflight failed: .gitignore missing or unreadable")
+        return 2
+
+    rules = _gitignore_rules(gitignore_text)
+    required_rules = ("captures/", "profiles/")
+    missing = [rule for rule in required_rules if rule not in rules]
+    if missing:
+        print("Tencent protocol preflight failed: missing gitignore rules")
+        for rule in missing:
+            print(f"- {rule}")
+        return 2
+
+    print("Tencent protocol preflight passed")
+    print("captures/ ignored")
+    print("profiles/ ignored")
+    return 0
+
+
+def _gitignore_rules(gitignore_text: str) -> set[str]:
+    rules: set[str] = set()
+    for line in gitignore_text.splitlines():
+        normalized = line.strip()
+        if not normalized or normalized.startswith("#") or normalized.startswith("!"):
+            continue
+        rules.add(normalized)
+    return rules
 
 
 def _validate_har_shape(har: dict[str, object]) -> None:

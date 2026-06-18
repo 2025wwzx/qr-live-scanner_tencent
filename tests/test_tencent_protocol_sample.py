@@ -274,6 +274,47 @@ def test_protocol_guide_cli_prints_safe_capture_workflow_without_secrets(
     assert "ticket=" not in lower_output
 
 
+def test_protocol_preflight_cli_verifies_sensitive_paths_are_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / ".gitignore").write_text("captures/\nprofiles/\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = _run_main(["tencent-protocol-preflight"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol preflight passed" in output
+    assert "captures/ ignored" in output
+    assert "profiles/ ignored" in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket=" not in output.lower()
+
+
+def test_protocol_preflight_cli_fails_when_sensitive_paths_are_not_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / ".gitignore").write_text("work/\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = _run_main(["tencent-protocol-preflight"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol preflight failed" in output
+    assert "captures/" in output
+    assert "profiles/" in output
+    assert "SECRET_VALUE_DO_NOT_LEAK" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket=" not in output.lower()
+
+
 def test_protocol_note_renders_validation_checklist_without_values() -> None:
     sample = {
         "source": "redacted-har",
