@@ -139,6 +139,156 @@ def test_tencent_login_cli_dry_run_checks_protocol_config_without_http(
     assert "verified-wechat-app" not in output
 
 
+def test_tencent_login_preflight_accepts_qq_qrconnect_without_http_or_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    unused_tcp_port: int,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/oauth/qq/callback"',
+                f'callback_bind_url = "http://127.0.0.1:{unused_tcp_port}/qq/callback"',
+                'app_id = "verified-qq-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_if_http_client_is_created(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("preflight must not create HTTP client")
+
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", "SECRET_QQ_APP_SECRET")
+    monkeypatch.setattr(httpx, "AsyncClient", fail_if_http_client_is_created)
+
+    exit_code = _run_main(
+        [
+            "tencent-login-preflight",
+            "--provider",
+            "qq",
+            "--protocol-config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent account login preflight passed" in output
+    assert "provider=qq" in output
+    assert "protocol_mode=qq_qrconnect" in output
+    assert "secret_env=present" in output
+    assert "callback_bind=available" in output
+    assert "real_http=not-called" in output
+    assert "SECRET_QQ_APP_SECRET" not in output
+    assert "graph.qq.com" not in output
+    assert "login.example.test" not in output
+    assert "verified-qq-app" not in output
+    assert str(unused_tcp_port) not in output
+
+
+def test_tencent_login_preflight_rejects_missing_wechat_secret_without_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    unused_tcp_port: int,
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = true",
+                'protocol_mode = "wechat_qrconnect"',
+                'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'query_url = "https://api.weixin.qq.com/sns/oauth2/access_token"',
+                'redirect_uri = "https://login.example.test/oauth/wechat/callback"',
+                f'callback_bind_url = "http://127.0.0.1:{unused_tcp_port}/wechat/callback"',
+                'app_id = "verified-wechat-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET", raising=False)
+
+    exit_code = _run_main(
+        [
+            "tencent-login-preflight",
+            "--provider",
+            "wechat",
+            "--protocol-config",
+            str(config_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent account login preflight failed" in output
+    assert "provider=wechat" in output
+    assert "secret_env" in output
+    assert "QR_LIVE_SCANNER_TENCENT_WECHAT_APP_SECRET" in output
+    assert "login.example.test" not in output
+    assert "verified-wechat-app" not in output
+    assert str(unused_tcp_port) not in output
+
+
+def test_tencent_login_preflight_rejects_busy_callback_bind_port(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    unused_tcp_port: int,
+) -> None:
+    import socket
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", unused_tcp_port))
+    listener.listen(1)
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_qrconnect"',
+                'fetch_url = "https://graph.qq.com/oauth2.0/authorize"',
+                'query_url = "https://graph.qq.com/oauth2.0/token"',
+                'redirect_uri = "https://login.example.test/oauth/qq/callback"',
+                f'callback_bind_url = "http://127.0.0.1:{unused_tcp_port}/qq/callback"',
+                'app_id = "verified-qq-app"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("QR_LIVE_SCANNER_TENCENT_QQ_APP_SECRET", "SECRET_QQ_APP_SECRET")
+
+    try:
+        exit_code = _run_main(
+            [
+                "tencent-login-preflight",
+                "--provider",
+                "qq",
+                "--protocol-config",
+                str(config_path),
+            ]
+        )
+    finally:
+        listener.close()
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent account login preflight failed" in output
+    assert "callback_bind" in output
+    assert "SECRET_QQ_APP_SECRET" not in output
+    assert "login.example.test" not in output
+    assert str(unused_tcp_port) not in output
+
+
 def test_tencent_login_cli_mock_confirm_saves_local_session_without_http(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

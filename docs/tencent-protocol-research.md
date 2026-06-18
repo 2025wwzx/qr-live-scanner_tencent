@@ -120,6 +120,10 @@ qr-live-scanner-tencent tencent-protocol-config-check `
   --provider qq `
   --config profiles/tencent-account-login.toml
 
+qr-live-scanner-tencent tencent-login-preflight `
+  --provider qq `
+  --protocol-config profiles/tencent-account-login.toml
+
 qr-live-scanner-tencent tencent-login `
   --provider qq `
   --protocol-config profiles/tencent-account-login.toml
@@ -131,6 +135,10 @@ Do not place Cookie, token, ticket, openid, uid, QR payload,
 credentials, session data, or signed URLs in this file.
 The config check is read-only and reports `real_http=not-called`; it does not
 create a QR ticket or contact Tencent.
+The login preflight is also read-only: it checks that the provider app secret
+environment variable is present when required and that the local callback bind
+port is currently available, but it does not create a QR ticket or contact
+Tencent.
 
 ## Required Validation
 

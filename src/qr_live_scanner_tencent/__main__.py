@@ -6,12 +6,14 @@ import json
 import math
 import os
 import re
+import socket
 import subprocess
 import time
 import tomllib
 from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlparse
 
 import httpx
 
@@ -19,13 +21,19 @@ import qr_live_scanner_tencent.smoke as smoke_module
 from qr_live_scanner_tencent.accounts import (
     KeyringAccountStore,
     LocalDeviceIdStore,
+    TencentAccountQRLoginConfig,
     TencentAccountQRLoginError,
+    TencentAccountQRLoginProtocolMode,
     TencentAccountQRLoginService,
     TencentAccountQRLoginState,
     TencentAccountQRLoginStatus,
     TencentAccountQRTicket,
     TencentSession,
     load_tencent_account_qr_login_config,
+)
+from qr_live_scanner_tencent.accounts.tencent_qr_login import (
+    TENCENT_QQ_APP_SECRET_ENV,
+    TENCENT_WECHAT_APP_SECRET_ENV,
 )
 from qr_live_scanner_tencent.interfaces import (
     DEFAULT_AGGRESSIVE_ROI,
@@ -115,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_gui_snapshot(args)
     if args.command == "tencent-login":
         return _run_tencent_login(args)
+    if args.command == "tencent-login-preflight":
+        return _run_tencent_login_preflight(args)
     if args.command == "tencent-list":
         return _run_tencent_list(args)
     if args.command == "tencent-repair-index":
@@ -216,6 +226,14 @@ def _build_parser() -> argparse.ArgumentParser:
     tencent_login_parser.add_argument("--protocol-config")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
+
+    tencent_login_preflight_parser = subparsers.add_parser("tencent-login-preflight")
+    tencent_login_preflight_parser.add_argument(
+        "--provider",
+        choices=[provider.value for provider in TencentLoginProvider],
+        default=TencentLoginProvider.QQ.value,
+    )
+    tencent_login_preflight_parser.add_argument("--protocol-config", required=True)
 
     tencent_list_parser = subparsers.add_parser("tencent-list")
     tencent_list_parser.add_argument(
@@ -1118,6 +1136,30 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_tencent_login_preflight(args: argparse.Namespace) -> int:
+    provider = TencentLoginProvider(str(args.provider))
+    try:
+        config_path = Path(_required_text(args.protocol_config, "protocol config path"))
+        config = load_tencent_account_qr_login_config(config_path, provider)
+        secret_state = _check_tencent_login_preflight_secret(config)
+        callback_state = _check_tencent_login_preflight_callback_bind(config)
+    except (OSError, ValueError, QRLiveScannerError, TencentAccountQRLoginError) as exc:
+        print(
+            "[WARN] Tencent account login preflight failed: "
+            f"provider={provider.value} {exc}"
+        )
+        return 2
+    print("Tencent account login preflight passed")
+    print(
+        f"provider={provider.value} "
+        f"protocol_mode={config.protocol_mode.value} "
+        f"secret_env={secret_state} "
+        f"callback_bind={callback_state} "
+        "real_http=not-called"
+    )
+    return 0
+
+
 def _run_tencent_login_mock_confirm(
     *,
     provider: TencentLoginProvider,
@@ -1358,6 +1400,49 @@ def _new_tencent_account_qr_login_service(
         device_id_store=LocalDeviceIdStore.default(),
         config=config,
     )
+
+
+def _check_tencent_login_preflight_secret(config: TencentAccountQRLoginConfig) -> str:
+    env_name = _tencent_login_secret_env_name(config.protocol_mode)
+    if env_name is None:
+        return "not-required"
+    if not _optional_text(os.environ.get(env_name)):
+        msg = f"secret_env missing: {env_name}"
+        raise TencentAccountQRLoginError(msg)
+    return "present"
+
+
+def _tencent_login_secret_env_name(
+    protocol_mode: TencentAccountQRLoginProtocolMode,
+) -> str | None:
+    if protocol_mode is TencentAccountQRLoginProtocolMode.QQ_QRCONNECT:
+        return TENCENT_QQ_APP_SECRET_ENV
+    if protocol_mode is TencentAccountQRLoginProtocolMode.WECHAT_QRCONNECT:
+        return TENCENT_WECHAT_APP_SECRET_ENV
+    return None
+
+
+def _check_tencent_login_preflight_callback_bind(
+    config: TencentAccountQRLoginConfig,
+) -> str:
+    if not config.callback_bind_url:
+        return "not-required"
+    parsed = urlparse(config.callback_bind_url)
+    host = str(parsed.hostname or "")
+    port = parsed.port
+    if not host or port is None:
+        msg = "callback_bind invalid"
+        raise TencentAccountQRLoginError(msg)
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    probe = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+    except OSError as exc:
+        msg = "callback_bind unavailable"
+        raise TencentAccountQRLoginError(msg) from exc
+    finally:
+        probe.close()
+    return "available"
 
 
 def _validate_tencent_login_timeout(value: float) -> float:
