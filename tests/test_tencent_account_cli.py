@@ -740,6 +740,8 @@ def test_tencent_status_cli_reports_saved_authorized_without_echoing_secrets(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    operations: list[str] = []
+
     class FakeStore:
         def get_tencent_session(
             self,
@@ -748,6 +750,7 @@ def test_tencent_status_cli_reports_saved_authorized_without_echoing_secrets(
         ) -> TencentSession | None:
             assert uid == "10001"
             assert provider is TencentLoginProvider.QQ
+            operations.append("get")
             return TencentSession(
                 uid=uid,
                 provider=provider,
@@ -761,7 +764,22 @@ def test_tencent_status_cli_reports_saved_authorized_without_echoing_secrets(
         ) -> bool:
             assert uid == "10001"
             assert provider is TencentLoginProvider.QQ
+            operations.append("authorized")
             return True
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            operations.append("list")
+            return [
+                TencentAccountIndexEntry(
+                    uid="10001",
+                    provider=provider,
+                    authorized=True,
+                )
+            ]
 
     monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
 
@@ -769,12 +787,63 @@ def test_tencent_status_cli_reports_saved_authorized_without_echoing_secrets(
     output = capsys.readouterr().out
 
     assert exit_code == 0
+    assert operations == ["get", "authorized", "list"]
     assert "saved and authorized" in output
+    assert "Tencent account index verified" in output
     assert "10001" not in output
     assert "SECRET_ACCESS_TOKEN" not in output
     assert "SECRET_OPENID" not in output
     assert "token" not in output.lower()
     assert "cookie" not in output.lower()
+
+
+def test_tencent_status_cli_fails_when_index_missing_after_read(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeStore:
+        def get_tencent_session(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> TencentSession | None:
+            assert uid == "10001"
+            assert provider is TencentLoginProvider.QQ
+            return TencentSession(
+                uid=uid,
+                provider=provider,
+                credentials={"access_token": "SECRET_ACCESS_TOKEN"},
+            )
+
+        def is_tencent_authorized(
+            self,
+            uid: str,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> bool:
+            assert uid == "10001"
+            assert provider is TencentLoginProvider.QQ
+            return True
+
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return []
+
+    monkeypatch.setattr(main_module, "KeyringAccountStore", FakeStore)
+
+    exit_code = main(["tencent-status", "--provider", "qq", "--uid", "10001"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "index verification failed" in output
+    assert "10001" not in output
+    assert "SECRET_ACCESS_TOKEN" not in output
+    assert "token" not in output.lower()
+    assert "cookie" not in output.lower()
+    assert "ticket" not in output.lower()
+    assert "payload" not in output.lower()
 
 
 def test_tencent_list_cli_reports_index_without_echoing_identifiers(

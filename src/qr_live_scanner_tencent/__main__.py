@@ -807,6 +807,9 @@ def _run_tencent_status(args: argparse.Namespace) -> int:
         if not store.is_tencent_authorized(uid, provider):
             print("Tencent account session status: saved but not authorized")
             return 1
+        if not _tencent_account_index_contains(store, uid, provider, authorized=True):
+            print("[WARN] Tencent account status failed: index verification failed")
+            return 1
     except AccountStoreError:
         print("[WARN] Tencent account status failed: credential storage unavailable")
         return 2
@@ -814,6 +817,7 @@ def _run_tencent_status(args: argparse.Namespace) -> int:
         print(f"[WARN] Tencent account status failed: {exc}")
         return 2
     print("Tencent account session status: saved and authorized")
+    print("Tencent account index verified")
     return 0
 
 
