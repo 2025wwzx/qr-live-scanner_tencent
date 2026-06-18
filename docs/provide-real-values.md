@@ -35,5 +35,6 @@ The artifact check is a post-generation guard: it fails if the generated sample
 or TOML skeleton was hand-edited to include signed URLs, sensitive fields,
 raw values, or `validated_protocol = true`.
 The readiness command checks that all generated checklist items are marked
-complete while still reporting `real_http=disabled`; it does not enable a real
-Tencent login flow.
+complete and rejects signed URLs or sensitive assignments in the note while
+still reporting `real_http=disabled`; it does not enable a real Tencent login
+flow.

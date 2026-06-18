@@ -963,6 +963,49 @@ def test_protocol_readiness_cli_rejects_unsafe_artifacts_without_echoing_values(
     assert secret not in output
 
 
+def test_protocol_readiness_cli_rejects_sensitive_note_values_without_echoing_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "SECRET_VALUE_DO_NOT_LEAK"
+    sample_path = tmp_path / "tencent-login.sample.json"
+    config_path = tmp_path / "tencent-account-login.toml"
+    note_path = tmp_path / "tencent-login.note.md"
+    _write_safe_protocol_sample(sample_path)
+    _write_safe_protocol_config(config_path)
+    sample = json.loads(sample_path.read_text(encoding="utf-8"))
+    note_path.write_text(
+        "\n".join(
+            [
+                render_tencent_protocol_note(sample).replace("- [ ] ", "- [x] "),
+                "",
+                "Leaked local URL:",
+                f"https://ssl.ptlogin2.qq.com/ptqrlogin?ticket={secret}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-readiness",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+            "--note",
+            str(note_path),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol readiness failed" in output
+    assert "protocol note" in output.lower()
+    assert secret not in output
+
+
 def _write_safe_protocol_sample(path: Path) -> None:
     path.write_text(
         json.dumps(

@@ -142,7 +142,9 @@ clean endpoint URLs without query strings or fragments, and an app ID
 placeholder. It must be manually verified and edited before it can be used for
 real HTTP.
 The artifact and readiness commands are local research gates only. They keep
-`real_http=disabled` and do not switch `validated_protocol` to true.
+`real_http=disabled` and do not switch `validated_protocol` to true. The
+readiness gate also rejects note text that contains signed URLs, query strings,
+or sensitive assignments such as `ticket=` or `Cookie:`.
 
 Inspect only the redacted file. Raw HAR, Cookie, token, QR payload, account ID,
 and full query strings must stay local and must not be committed.

@@ -68,7 +68,8 @@ payload, or header values.
 generated research artifacts; it rejects unsafe sample/config edits without
 printing the raw values.
 `tencent-protocol-readiness` checks the generated note checklist and keeps
-`real_http=disabled`; it is a research gate, not a real-login switch.
+`real_http=disabled`; it also rejects signed URLs or sensitive assignments in
+the note. It is a research gate, not a real-login switch.
 
 已新增独立账号登录链路：`tencent-login` 会由本项目生成 QQ/微信账号登录二维码，
 确认成功后将 `TencentSession` 保存到本地 keyring 的 `qr-live-scanner-tencent`

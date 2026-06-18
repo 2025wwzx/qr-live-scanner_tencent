@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlparse, urlsplit, urlunsplit
@@ -66,6 +67,13 @@ TENCENT_PROTOCOL_SAMPLE_ENTRY_ARTIFACT_FIELDS = frozenset(
         "response_header_names",
         "response_body_mime_type",
     }
+)
+PROTOCOL_NOTE_URL_PATTERN = re.compile(r"https?://[^\s)>`\]\"']+")
+PROTOCOL_NOTE_SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)\b("
+    r"access[_-]?token|authorization|cookie|login[_-]?ticket|openid|payload|"
+    r"qr[_-]?payload|qrsig|scan[_-]?token|secret|ticket|token|uid"
+    r")\s*[:=]"
 )
 
 
@@ -229,6 +237,7 @@ def check_tencent_protocol_readiness(
     """
 
     artifact = check_tencent_protocol_artifacts(sample, config)
+    _assert_protocol_note_has_no_raw_values(note_text)
     checklist = _protocol_note_checklist_state(note_text)
     missing_items = tuple(
         item for item in PROTOCOL_NOTE_CHECKLIST_ITEMS if checklist.get(item) is not True
@@ -326,6 +335,16 @@ def _protocol_note_checklist_state(note_text: str) -> dict[str, bool]:
     if missing_template_items:
         raise ValueError("protocol note validation checklist is incomplete")
     return checklist
+
+
+def _assert_protocol_note_has_no_raw_values(note_text: str) -> None:
+    text = _required_text(note_text, "protocol note text is required")
+    if PROTOCOL_NOTE_SENSITIVE_ASSIGNMENT_PATTERN.search(text):
+        raise ValueError("protocol note contains unsafe raw values")
+    for match in PROTOCOL_NOTE_URL_PATTERN.finditer(text):
+        parsed = urlparse(match.group(0))
+        if parsed.query or parsed.fragment:
+            raise ValueError("protocol note contains unsafe raw values")
 
 
 def _validate_protocol_sample_artifact_entry(value: Any) -> None:
