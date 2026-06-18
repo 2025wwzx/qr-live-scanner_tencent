@@ -1196,6 +1196,84 @@ def test_protocol_config_check_cli_accepts_validated_config_without_http_or_valu
     assert "cookie" not in output.lower()
 
 
+def test_protocol_config_check_cli_accepts_qq_ptlogin_mode_without_http_or_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.qq]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_ptlogin"',
+                'fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow"',
+                'query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"',
+                'app_id = "verified-app"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-check",
+            "--config",
+            str(config_path),
+            "--provider",
+            "qq",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Tencent protocol config check passed" in output
+    assert "provider=qq" in output
+    assert "real_http=not-called" in output
+    assert "ptlogin2.qq.com" not in output
+    assert "verified-app" not in output
+
+
+def test_protocol_config_check_cli_rejects_qq_ptlogin_for_wechat_without_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = tmp_path / "tencent-account-login.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[account_qr_login.wechat]",
+                "validated_protocol = true",
+                'protocol_mode = "qq_ptlogin"',
+                'fetch_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'query_url = "https://open.weixin.qq.com/connect/qrconnect"',
+                'app_id = "verified-app"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = _run_main(
+        [
+            "tencent-protocol-config-check",
+            "--config",
+            str(config_path),
+            "--provider",
+            "wechat",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "Tencent protocol config check failed" in output
+    assert "provider=wechat" in output
+    assert "protocol mode" in output.lower()
+    assert "open.weixin.qq.com" not in output
+    assert "verified-app" not in output
+
+
 def test_protocol_config_check_cli_rejects_unsafe_config_without_echoing_values(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

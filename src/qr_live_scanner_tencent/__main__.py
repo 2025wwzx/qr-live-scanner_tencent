@@ -654,9 +654,13 @@ def _run_tencent_protocol_config_check(args: argparse.Namespace) -> int:
     config_path = Path(str(args.config))
     try:
         provider = TencentLoginProvider(str(args.provider))
+    except ValueError as exc:
+        print(f"[WARN] Tencent protocol config check failed: {exc}")
+        return 2
+    try:
         config = load_tencent_account_qr_login_config(config_path, provider)
     except (OSError, ValueError, TencentAccountQRLoginError) as exc:
-        print(f"[WARN] Tencent protocol config check failed: {exc}")
+        print(f"[WARN] Tencent protocol config check failed: provider={provider.value}: {exc}")
         return 2
 
     print("Tencent protocol config check passed")

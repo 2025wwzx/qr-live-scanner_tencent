@@ -49,6 +49,24 @@ query_url = "https://example.test/qq/query"
 app_id = "verified-app-id"
 ```
 
+The default `protocol_mode` is `json_post`, which matches the original mockable
+adapter contract. QQ can opt into the first real-shape adapter after local
+verification:
+
+```toml
+[account_qr_login.qq]
+validated_protocol = true
+protocol_mode = "qq_ptlogin"
+fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow"
+query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"
+app_id = "verified-qq-app-id"
+```
+
+`qq_ptlogin` writes the QR image bytes returned by the fetch endpoint, carries
+the runtime `qrsig` only in memory, computes `ptqrtoken`, maps `ptuiCB(...)`
+poll states, and saves confirmed QQ cookies into `TencentSession.credentials`.
+WeChat still needs its own verified protocol mode before real HTTP is enabled.
+
 Use it only with clean endpoint URLs:
 
 ```powershell

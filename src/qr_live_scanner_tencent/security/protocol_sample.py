@@ -11,6 +11,7 @@ from qr_live_scanner_tencent.accounts.tencent_qr_login import (
     ACCOUNT_QR_LOGIN_CONFIG_SECTION,
     ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS,
     ACCOUNT_QR_LOGIN_SENSITIVE_VALUE_FRAGMENTS,
+    TencentAccountQRLoginProtocolMode,
 )
 from qr_live_scanner_tencent.interfaces import TencentLoginProvider
 from qr_live_scanner_tencent.security.har import (
@@ -406,13 +407,20 @@ def _validate_account_qr_config_artifact(
     provider_section = section.get(provider.value)
     if not isinstance(provider_section, dict):
         raise ValueError("protocol config artifact provider section is missing")
-    for raw_provider_section in section.values():
+    for raw_provider, raw_provider_section in section.items():
         if not isinstance(raw_provider_section, dict):
             raise ValueError("protocol config artifact provider section is invalid")
-        _validate_account_qr_config_provider_artifact(raw_provider_section)
+        _validate_account_qr_config_provider_artifact(
+            raw_provider_section,
+            provider=TencentLoginProvider(str(raw_provider)),
+        )
 
 
-def _validate_account_qr_config_provider_artifact(provider_section: dict[str, Any]) -> None:
+def _validate_account_qr_config_provider_artifact(
+    provider_section: dict[str, Any],
+    *,
+    provider: TencentLoginProvider,
+) -> None:
     unknown_fields = set(provider_section) - ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS
     if unknown_fields:
         raise ValueError("protocol config artifact contains unsupported fields")
@@ -423,6 +431,21 @@ def _validate_account_qr_config_provider_artifact(provider_section: dict[str, An
     _validate_artifact_app_id(
         _required_text(provider_section.get("app_id"), "protocol config app id is required"),
     )
+    if "protocol_mode" in provider_section:
+        _validate_artifact_protocol_mode(provider_section.get("protocol_mode"), provider=provider)
+
+
+def _validate_artifact_protocol_mode(value: object, *, provider: TencentLoginProvider) -> None:
+    text = _required_text(value, "protocol config protocol mode is required")
+    try:
+        protocol_mode = TencentAccountQRLoginProtocolMode(text)
+    except ValueError as exc:
+        raise ValueError("protocol config protocol mode is unsupported") from exc
+    if (
+        protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN
+        and provider is not TencentLoginProvider.QQ
+    ):
+        raise ValueError("protocol config protocol mode is unsupported")
 
 
 def _validate_artifact_endpoint_url(value: object) -> None:

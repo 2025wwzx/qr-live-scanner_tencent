@@ -8,6 +8,7 @@ from qr_live_scanner_tencent.accounts.store import FakeAccountStore, KeyringAcco
 from qr_live_scanner_tencent.accounts.tencent_qr_login import (
     TencentAccountQRLoginConfig,
     TencentAccountQRLoginError,
+    TencentAccountQRLoginProtocolMode,
     TencentAccountQRLoginService,
     TencentAccountQRLoginState,
     TencentAccountQRLoginStatus,
@@ -21,6 +22,7 @@ __all__ = [
     "LocalDeviceIdStore",
     "TencentAccountQRLoginConfig",
     "TencentAccountQRLoginError",
+    "TencentAccountQRLoginProtocolMode",
     "TencentAccountQRLoginService",
     "TencentAccountQRLoginState",
     "TencentAccountQRLoginStatus",

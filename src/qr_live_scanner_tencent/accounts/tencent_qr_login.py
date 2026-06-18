@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -26,7 +28,7 @@ TENCENT_WECHAT_QR_QUERY_URL = "https://example.invalid/tencent/account/wechat/qr
 TENCENT_DRY_RUN_QR_PREFIX = "qr-live-scanner-tencent://account-login/dry-run"
 ACCOUNT_QR_LOGIN_CONFIG_SECTION = "account_qr_login"
 ACCOUNT_QR_LOGIN_ALLOWED_CONFIG_FIELDS = frozenset(
-    {"validated_protocol", "fetch_url", "query_url", "app_id"}
+    {"validated_protocol", "fetch_url", "query_url", "app_id", "protocol_mode"}
 )
 ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS = frozenset(
     {
@@ -46,6 +48,19 @@ ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS = frozenset(
 ACCOUNT_QR_LOGIN_SENSITIVE_VALUE_FRAGMENTS = frozenset(
     ACCOUNT_QR_LOGIN_SENSITIVE_KEY_FRAGMENTS | {"authorization", "qrsig", "scan_token"}
 )
+QQ_PTLOGIN_IMAGE_SIGNATURES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")
+QQ_PTLOGIN_UID_COOKIE_NAMES = ("uin", "ptui_loginuin")
+QQ_PTLOGIN_AUTH_COOKIE_NAMES = frozenset(
+    {
+        "skey",
+        "p_skey",
+        "pt4_token",
+        "ptcz",
+        "pt2gguin",
+        "uin",
+        "ptui_loginuin",
+    }
+)
 
 
 class TencentAccountQRLoginState(StrEnum):
@@ -56,11 +71,20 @@ class TencentAccountQRLoginState(StrEnum):
     FAILED = "failed"
 
 
+class TencentAccountQRLoginProtocolMode(StrEnum):
+    JSON_POST = "json_post"
+    QQ_PTLOGIN = "qq_ptlogin"
+
+
 class TencentAccountQRLoginError(Exception):
     """Tencent 账号二维码登录失败；错误信息不得包含凭据、账号 ID 或二维码原文。"""
 
 
 class _TencentAccountQRDryRunClient:
+    async def get(self, _url: str, **_kwargs: Any) -> httpx.Response:
+        msg = "Tencent account QR dry-run client cannot perform HTTP"
+        raise TencentAccountQRLoginError(msg)
+
     async def post(self, _url: str, **_kwargs: Any) -> httpx.Response:
         msg = "Tencent account QR dry-run client cannot perform HTTP"
         raise TencentAccountQRLoginError(msg)
@@ -83,6 +107,16 @@ class TencentAccountQRLoginConfig:
     query_url: str
     app_id: str = ""
     validated_protocol: bool = False
+    protocol_mode: TencentAccountQRLoginProtocolMode = TencentAccountQRLoginProtocolMode.JSON_POST
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "provider", TencentLoginProvider(str(self.provider)))
+        object.__setattr__(
+            self,
+            "protocol_mode",
+            TencentAccountQRLoginProtocolMode(str(self.protocol_mode)),
+        )
+        _ensure_protocol_mode_supported(self.provider, self.protocol_mode)
 
     def validated(
         self,
@@ -90,13 +124,19 @@ class TencentAccountQRLoginConfig:
         fetch_url: str,
         query_url: str,
         app_id: str,
+        protocol_mode: TencentAccountQRLoginProtocolMode | str | None = None,
     ) -> TencentAccountQRLoginConfig:
+        normalized_mode = (
+            self.protocol_mode if protocol_mode is None else _protocol_mode(protocol_mode)
+        )
+        _ensure_protocol_mode_supported(self.provider, normalized_mode)
         return replace(
             self,
             fetch_url=_require_text(fetch_url, "Tencent account QR fetch URL is required"),
             query_url=_require_text(query_url, "Tencent account QR query URL is required"),
             app_id=_require_text(app_id, "Tencent account QR app id is required"),
             validated_protocol=True,
+            protocol_mode=normalized_mode,
         )
 
 
@@ -148,6 +188,12 @@ def load_tencent_account_qr_login_config(
         fetch_url=_require_endpoint_url(provider_section.get("fetch_url")),
         query_url=_require_endpoint_url(provider_section.get("query_url")),
         app_id=_require_app_id(provider_section.get("app_id")),
+        protocol_mode=_protocol_mode(
+            provider_section.get(
+                "protocol_mode",
+                TencentAccountQRLoginProtocolMode.JSON_POST.value,
+            )
+        ),
     )
 
 
@@ -166,6 +212,7 @@ class TencentAccountQRTicket:
     device_id: str
     expires_in_seconds: int | None = None
     dry_run: bool = False
+    qr_image_bytes: bytes | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "provider", TencentLoginProvider(str(self.provider)))
@@ -177,6 +224,12 @@ class TencentAccountQRTicket:
             "device_id",
             _require_text(self.device_id, "device id is required"),
         )
+        if self.qr_image_bytes is not None:
+            object.__setattr__(
+                self,
+                "qr_image_bytes",
+                _require_qr_image_bytes(self.qr_image_bytes),
+            )
 
     def safe_description(self) -> str:
         mode = "dry-run " if self.dry_run else ""
@@ -218,6 +271,8 @@ class TencentAccountQRLoginService:
 
     async def fetch_qr(self) -> TencentAccountQRTicket:
         self._ensure_protocol_validated()
+        if self.config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN:
+            return await self._fetch_qr_qq_ptlogin()
         device_id = self.device_id_store.get_or_create()
         try:
             response = await self.client.post(
@@ -248,6 +303,8 @@ class TencentAccountQRLoginService:
         ticket: str | TencentAccountQRTicket,
     ) -> TencentAccountQRLoginStatus:
         self._ensure_protocol_validated()
+        if self.config.protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN:
+            return await self._query_qr_qq_ptlogin(ticket)
         ticket_value = _ticket_value(ticket)
         device_id = (
             ticket.device_id
@@ -306,6 +363,9 @@ class TencentAccountQRLoginService:
 
     def write_qr_png(self, ticket: TencentAccountQRTicket, output_path: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        if ticket.qr_image_bytes is not None:
+            output_path.write_bytes(ticket.qr_image_bytes)
+            return
         image = qrcode.make(ticket.qr_url)
         image.save(output_path)
 
@@ -323,6 +383,53 @@ class TencentAccountQRLoginService:
             msg = "Tencent account QR session storage failed"
             raise TencentAccountQRLoginError(msg) from exc
         return status.session
+
+    async def _fetch_qr_qq_ptlogin(self) -> TencentAccountQRTicket:
+        device_id = self.device_id_store.get_or_create()
+        try:
+            response = await self.client.get(
+                self.config.fetch_url,
+                params=_qq_ptlogin_fetch_params(self.config.app_id),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            msg = "Tencent account QR fetch HTTP failed"
+            raise TencentAccountQRLoginError(msg) from exc
+
+        return TencentAccountQRTicket(
+            provider=self.config.provider,
+            app_id=self.config.app_id,
+            ticket=_qq_qrsig_from_response(response),
+            qr_url=self.config.fetch_url,
+            device_id=device_id,
+            qr_image_bytes=_require_qr_image_bytes(response.content),
+        )
+
+    async def _query_qr_qq_ptlogin(
+        self,
+        ticket: str | TencentAccountQRTicket,
+    ) -> TencentAccountQRLoginStatus:
+        qrsig = _ticket_value(ticket)
+        try:
+            response = await self.client.get(
+                self.config.query_url,
+                params=_qq_ptlogin_query_params(self.config.app_id, qrsig),
+                headers={"Cookie": f"qrsig={_cookie_header_value(qrsig)}"},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            msg = "Tencent account QR query HTTP failed"
+            raise TencentAccountQRLoginError(msg) from exc
+
+        callback = _parse_qq_ptlogin_callback(response.text)
+        state = _qq_ptlogin_state(callback.code)
+        if state is not TencentAccountQRLoginState.CONFIRMED:
+            return TencentAccountQRLoginStatus(provider=self.config.provider, state=state)
+        return TencentAccountQRLoginStatus(
+            provider=self.config.provider,
+            state=state,
+            session=_qq_session_from_response(self.config.provider, response),
+        )
 
     async def aclose(self) -> None:
         await self.client.aclose()
@@ -378,6 +485,152 @@ class TencentAccountQRLoginService:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _QQPtloginCallback:
+    code: str
+    redirect_url: str
+
+
+def _protocol_mode(value: object) -> TencentAccountQRLoginProtocolMode:
+    try:
+        return TencentAccountQRLoginProtocolMode(str(value or "").strip())
+    except ValueError as exc:
+        msg = "Tencent account QR protocol mode is unsupported"
+        raise TencentAccountQRLoginError(msg) from exc
+
+
+def _ensure_protocol_mode_supported(
+    provider: TencentLoginProvider,
+    protocol_mode: TencentAccountQRLoginProtocolMode,
+) -> None:
+    if protocol_mode is TencentAccountQRLoginProtocolMode.QQ_PTLOGIN:
+        normalized_provider = TencentLoginProvider(str(provider))
+        if normalized_provider is not TencentLoginProvider.QQ:
+            msg = "Tencent account QR protocol mode is not supported for provider"
+            raise TencentAccountQRLoginError(msg)
+
+
+def _qq_ptlogin_fetch_params(app_id: str) -> dict[str, str]:
+    return {
+        "appid": _require_text(app_id, "Tencent account QR app id is required"),
+        "e": "2",
+        "l": "M",
+        "s": "3",
+        "d": "72",
+        "v": "4",
+        "t": "0.1",
+    }
+
+
+def _qq_ptlogin_query_params(app_id: str, qrsig: str) -> dict[str, str]:
+    return {
+        "aid": _require_text(app_id, "Tencent account QR app id is required"),
+        "ptqrtoken": _qq_hash33(_require_text(qrsig, "Tencent account QR ticket is required")),
+        "ptredirect": "0",
+        "h": "1",
+        "t": "1",
+        "g": "1",
+        "from_ui": "1",
+        "ptlang": "2052",
+        "action": "0-0-0",
+        "js_type": "1",
+        "pt_uistyle": "40",
+    }
+
+
+def _qq_hash33(value: str) -> str:
+    token = 0
+    for char in value:
+        token += (token << 5) + ord(char)
+    return str(token & 0x7FFFFFFF)
+
+
+def _qq_qrsig_from_response(response: httpx.Response) -> str:
+    cookies = _cookies_from_response(response)
+    qrsig = cookies.get("qrsig")
+    if not qrsig:
+        msg = "Tencent account QR fetch response missing ticket"
+        raise TencentAccountQRLoginError(msg)
+    return _cookie_header_value(qrsig)
+
+
+def _cookie_header_value(value: object) -> str:
+    text = _require_text(value, "Tencent account QR ticket is required")
+    if any(char in text for char in "\r\n;"):
+        msg = "Tencent account QR ticket is invalid"
+        raise TencentAccountQRLoginError(msg)
+    return text
+
+
+def _parse_qq_ptlogin_callback(text: str) -> _QQPtloginCallback:
+    values = re.findall(r"'([^']*)'", text)
+    if not values:
+        msg = "Tencent account QR query response failed"
+        raise TencentAccountQRLoginError(msg)
+    redirect_url = values[2] if len(values) > 2 else ""
+    return _QQPtloginCallback(code=values[0], redirect_url=redirect_url)
+
+
+def _qq_ptlogin_state(code: str) -> TencentAccountQRLoginState:
+    normalized = str(code or "").strip()
+    if normalized == "0":
+        return TencentAccountQRLoginState.CONFIRMED
+    if normalized == "67":
+        return TencentAccountQRLoginState.SCANNED
+    if normalized in {"65", "68"}:
+        return TencentAccountQRLoginState.EXPIRED
+    if normalized == "66":
+        return TencentAccountQRLoginState.WAITING
+    return TencentAccountQRLoginState.FAILED
+
+
+def _qq_session_from_response(
+    provider: TencentLoginProvider,
+    response: httpx.Response,
+) -> TencentSession:
+    cookies = _cookies_from_response(response)
+    uid = _qq_uid_from_cookies(cookies)
+    credentials = {
+        f"cookie_{name}": value
+        for name, value in sorted(cookies.items())
+        if name in QQ_PTLOGIN_AUTH_COOKIE_NAMES
+    }
+    if not credentials or not any(
+        name in credentials for name in ("cookie_skey", "cookie_p_skey", "cookie_pt4_token")
+    ):
+        msg = "Tencent account QR confirmed session failed"
+        raise TencentAccountQRLoginError(msg)
+    return TencentSession(uid=uid, provider=provider, credentials=credentials)
+
+
+def _qq_uid_from_cookies(cookies: dict[str, str]) -> str:
+    for name in QQ_PTLOGIN_UID_COOKIE_NAMES:
+        value = cookies.get(name)
+        if not value:
+            continue
+        if value.startswith("o") and value[1:].isdigit():
+            return value[1:]
+        return value
+    msg = "Tencent account QR confirmed session failed"
+    raise TencentAccountQRLoginError(msg)
+
+
+def _cookies_from_response(response: httpx.Response) -> dict[str, str]:
+    cookies: dict[str, str] = {}
+    for header in response.headers.get_list("set-cookie"):
+        jar = SimpleCookie()
+        try:
+            jar.load(header)
+        except Exception:
+            continue
+        for morsel in jar.values():
+            name = str(morsel.key or "").strip().lower()
+            value = str(morsel.value or "").strip()
+            if name and value:
+                cookies[name] = value
+    return cookies
+
+
 def _response_payload(response: httpx.Response, message: str) -> dict[str, Any]:
     try:
         data = response.json()
@@ -423,6 +676,16 @@ def _parse_expires_in(value: object) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None
+
+
+def _require_qr_image_bytes(value: object) -> bytes:
+    if not isinstance(value, bytes) or not value:
+        msg = "Tencent account QR fetch response missing image"
+        raise TencentAccountQRLoginError(msg)
+    if not any(value.startswith(signature) for signature in QQ_PTLOGIN_IMAGE_SIGNATURES):
+        msg = "Tencent account QR fetch response missing image"
+        raise TencentAccountQRLoginError(msg)
+    return value
 
 
 def _parse_state(value: object) -> TencentAccountQRLoginState:
