@@ -225,6 +225,7 @@ def _build_parser() -> argparse.ArgumentParser:
     tencent_login_parser.add_argument("--mock-uid")
     tencent_login_parser.add_argument("--qr-output", default="work/tencent-login-qr.png")
     tencent_login_parser.add_argument("--open-qr", action="store_true")
+    tencent_login_parser.add_argument("--open-provider-page", action="store_true")
     tencent_login_parser.add_argument("--protocol-config")
     tencent_login_parser.add_argument("--poll-interval-seconds", type=float, default=2.0)
     tencent_login_parser.add_argument("--timeout-seconds", type=float, default=60.0)
@@ -1114,25 +1115,16 @@ def _run_tencent_login(args: argparse.Namespace) -> int:
             provider,
             protocol_config_path=_optional_text(args.protocol_config),
         )
-        if bool(args.open_qr):
-            session = asyncio.run(
-                _capture_tencent_session_from_qr(
-                    service,
-                    qr_output_path=qr_output_path,
-                    timeout_seconds=timeout_seconds,
-                    poll_interval_seconds=poll_interval_seconds,
-                    open_qr=True,
-                )
+        session = asyncio.run(
+            _capture_tencent_session_from_qr(
+                service,
+                qr_output_path=qr_output_path,
+                timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+                open_qr=bool(args.open_qr),
+                open_provider_page=bool(args.open_provider_page),
             )
-        else:
-            session = asyncio.run(
-                _capture_tencent_session_from_qr(
-                    service,
-                    qr_output_path=qr_output_path,
-                    timeout_seconds=timeout_seconds,
-                    poll_interval_seconds=poll_interval_seconds,
-                )
-            )
+        )
         if session.provider is not provider:
             msg = "Tencent account provider mismatch"
             raise TencentAccountQRLoginError(msg)
@@ -1479,6 +1471,7 @@ async def _capture_tencent_session_from_qr(
     timeout_seconds: float,
     poll_interval_seconds: float,
     open_qr: bool = False,
+    open_provider_page: bool = False,
 ) -> TencentSession:
     try:
         ticket = await service.fetch_qr()
@@ -1490,6 +1483,12 @@ async def _capture_tencent_session_from_qr(
                 print("Tencent account QR image opened")
             except TencentAccountQRLoginError as exc:
                 print(f"[WARN] Tencent account QR image open failed: {exc}")
+        if open_provider_page:
+            try:
+                _open_tencent_provider_page(ticket)
+                print("Tencent account provider authorization page opened")
+            except TencentAccountQRLoginError as exc:
+                print(f"[WARN] Tencent account provider page open failed: {exc}")
         deadline = time.monotonic() + timeout_seconds
         scanned_reported = False
         while time.monotonic() < deadline:
@@ -1540,19 +1539,40 @@ def _open_tencent_qr_png(output_path: Path) -> None:
     if not output_path.exists():
         msg = "Tencent account QR image is missing"
         raise TencentAccountQRLoginError(msg)
+    _open_tencent_local_target(output_path, "Tencent account QR image could not be opened")
+
+
+def _open_tencent_provider_page(ticket: TencentAccountQRTicket) -> None:
+    if ticket.qr_image_bytes is not None:
+        msg = "Tencent account provider page is not available for image-ticket mode"
+        raise TencentAccountQRLoginError(msg)
+    _open_tencent_url(ticket.qr_url)
+
+
+def _open_tencent_url(url: str) -> None:
+    if "\r" in url or "\n" in url:
+        msg = "Tencent account provider page URL is invalid"
+        raise TencentAccountQRLoginError(msg)
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        msg = "Tencent account provider page URL is invalid"
+        raise TencentAccountQRLoginError(msg)
+    _open_tencent_local_target(url, "Tencent account provider page could not be opened")
+
+
+def _open_tencent_local_target(target: str | Path, message: str) -> None:
     try:
         if sys.platform.startswith("win"):
-            os.startfile(output_path)
+            os.startfile(target)
             return
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         subprocess.Popen(  # noqa: S603
-            [opener, str(output_path)],
+            [opener, str(target)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
     except OSError as exc:
-        msg = "Tencent account QR image could not be opened"
-        raise TencentAccountQRLoginError(msg) from exc
+        raise TencentAccountQRLoginError(message) from exc
 
 
 if __name__ == "__main__":

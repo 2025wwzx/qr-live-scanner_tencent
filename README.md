@@ -250,6 +250,9 @@ signed URL into TOML, docs, logs, or git.
 For mobile QR scans, register or tunnel the public `redirect_uri` to the local
 `callback_bind_url`; the local bind URL must stay on `127.0.0.1`, `localhost`,
 or `::1`.
+Use `--open-qr` to open the locally generated QR image, or
+`--open-provider-page` to open the official QQ/WeChat authorization page for
+OAuth QR-connect modes. Neither option prints the full authorization URL.
 
 ```powershell
 qr-live-scanner-tencent tencent-protocol-config-check --provider qq --config .\profiles\tencent-account-login.toml

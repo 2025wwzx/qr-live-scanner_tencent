@@ -140,6 +140,9 @@ The login preflight is also read-only: it checks that the provider app secret
 environment variable is present when required and that the local callback bind
 port is currently available, but it does not create a QR ticket or contact
 Tencent.
+For OAuth QR-connect modes, `--open-provider-page` may be used instead of
+`--open-qr` when the provider page itself must render the QR code; the full
+authorization URL remains in memory and is not printed.
 
 ## Required Validation
 
