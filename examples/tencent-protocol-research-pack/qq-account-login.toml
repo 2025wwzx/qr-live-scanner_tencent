@@ -1,0 +1,5 @@
+[account_qr_login.qq]
+validated_protocol = false
+fetch_url = "https://ssl.ptlogin2.qq.com/ptqrshow"
+query_url = "https://ssl.ptlogin2.qq.com/ptqrlogin"
+app_id = "TODO-verified-app-id"

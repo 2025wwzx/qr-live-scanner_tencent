@@ -2,6 +2,10 @@
 
 Use this note when supplying local captures for Tencent protocol research.
 
+Before collecting real values, run the sanitized rehearsal pack in
+`examples/tencent-protocol-research-pack` to confirm the local artifact and
+readiness gates work on your machine.
+
 ## Do Not Share
 
 - Raw HAR files.

@@ -1045,6 +1045,66 @@ def test_protocol_readiness_cli_rejects_sensitive_note_values_without_echoing_va
     assert secret not in output
 
 
+def test_sanitized_research_pack_example_passes_local_gates(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    pack_dir = Path("examples/tencent-protocol-research-pack")
+    sample_path = pack_dir / "qq-account-login.sample.json"
+    config_path = pack_dir / "qq-account-login.toml"
+    note_path = pack_dir / "qq-account-login.note.md"
+
+    assert sample_path.exists()
+    assert config_path.exists()
+    assert note_path.exists()
+
+    combined_text = "\n".join(
+        [
+            sample_path.read_text(encoding="utf-8"),
+            config_path.read_text(encoding="utf-8"),
+            note_path.read_text(encoding="utf-8"),
+        ]
+    )
+    assert "[REDACTED]" not in combined_text
+    assert "SECRET" not in combined_text
+    assert "access_token" not in combined_text
+    assert "openid" not in combined_text
+    assert "qrsig" not in combined_text
+    assert "Cookie:" not in combined_text
+    assert "ticket=" not in combined_text
+    assert "validated_protocol = false" in combined_text
+
+    artifact_exit_code = _run_main(
+        [
+            "tencent-protocol-artifact-check",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+    artifact_output = capsys.readouterr().out
+
+    assert artifact_exit_code == 0
+    assert "Tencent protocol artifacts passed" in artifact_output
+
+    readiness_exit_code = _run_main(
+        [
+            "tencent-protocol-readiness",
+            "--sample",
+            str(sample_path),
+            "--config",
+            str(config_path),
+            "--note",
+            str(note_path),
+        ]
+    )
+    readiness_output = capsys.readouterr().out
+
+    assert readiness_exit_code == 0
+    assert "Tencent protocol readiness passed" in readiness_output
+    assert "real_http=disabled" in readiness_output
+
+
 def test_protocol_config_check_cli_accepts_validated_config_without_http_or_values(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

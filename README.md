@@ -71,6 +71,15 @@ printing the raw values.
 `real_http=disabled`; it also rejects signed URLs or sensitive assignments in
 the note. It is a research gate, not a real-login switch.
 
+A sanitized rehearsal pack is committed at
+`examples/tencent-protocol-research-pack`. It can be used to test the local
+artifact and readiness gates before collecting real captures:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-artifact-check --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json --config examples/tencent-protocol-research-pack/qq-account-login.toml
+qr-live-scanner-tencent tencent-protocol-readiness --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json --config examples/tencent-protocol-research-pack/qq-account-login.toml --note examples/tencent-protocol-research-pack/qq-account-login.note.md
+```
+
 已新增独立账号登录链路：`tencent-login` 会由本项目生成 QQ/微信账号登录二维码，
 确认成功后将 `TencentSession` 保存到本地 keyring 的 `qr-live-scanner-tencent`
 namespace。当前真实 QQ/微信协议参数仍未验证，默认只允许 `--dry-run`、本地

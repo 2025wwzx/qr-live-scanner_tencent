@@ -1,0 +1,50 @@
+{
+  "source": "redacted-har",
+  "provider": "qq",
+  "flow": "account-login",
+  "entries": [
+    {
+      "index": 0,
+      "method": "GET",
+      "scheme": "https",
+      "host": "ssl.ptlogin2.qq.com",
+      "path": "/ptqrshow",
+      "query_keys": [
+        "appid"
+      ],
+      "request_header_names": [
+        "referer",
+        "user-agent"
+      ],
+      "request_body_mime_type": "",
+      "has_request_body": false,
+      "response_status": 200,
+      "response_header_names": [
+        "content-type"
+      ],
+      "response_body_mime_type": "image/png"
+    },
+    {
+      "index": 1,
+      "method": "GET",
+      "scheme": "https",
+      "host": "ssl.ptlogin2.qq.com",
+      "path": "/ptqrlogin",
+      "query_keys": [
+        "appid",
+        "ptqrtoken"
+      ],
+      "request_header_names": [
+        "referer",
+        "user-agent"
+      ],
+      "request_body_mime_type": "",
+      "has_request_body": false,
+      "response_status": 200,
+      "response_header_names": [
+        "content-type"
+      ],
+      "response_body_mime_type": "application/javascript"
+    }
+  ]
+}

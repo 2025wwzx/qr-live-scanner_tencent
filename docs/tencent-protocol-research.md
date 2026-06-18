@@ -156,6 +156,25 @@ or sensitive assignments such as `ticket=` or `Cookie:`.
 Inspect only the redacted file. Raw HAR, Cookie, token, QR payload, account ID,
 and full query strings must stay local and must not be committed.
 
+## Sanitized Example Pack
+
+Before collecting real captures, you can rehearse the local gates with the
+committed sanitized pack:
+
+```powershell
+qr-live-scanner-tencent tencent-protocol-artifact-check `
+  --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json `
+  --config examples/tencent-protocol-research-pack/qq-account-login.toml
+
+qr-live-scanner-tencent tencent-protocol-readiness `
+  --sample examples/tencent-protocol-research-pack/qq-account-login.sample.json `
+  --config examples/tencent-protocol-research-pack/qq-account-login.toml `
+  --note examples/tencent-protocol-research-pack/qq-account-login.note.md
+```
+
+The example pack is synthetic, keeps `validated_protocol = false`, and does not
+enable real HTTP.
+
 ## Enablement Gate
 
 Real confirm may be enabled only after all of these are true:
