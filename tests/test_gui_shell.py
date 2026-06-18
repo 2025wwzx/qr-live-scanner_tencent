@@ -248,11 +248,12 @@ def test_main_window_contains_core_controls(qtbot: QtBot) -> None:
     account_menu = window.menuBar().actions()[0].menu()
     assert account_menu is not None
     assert isinstance(account_menu, QMenu)
-    assert [action.text() for action in account_menu.actions()[:8]] == [
+    assert [action.text() for action in account_menu.actions()[:9]] == [
         "新增账号",
         "导入已保存账号",
         "导入全部已保存账号",
         "检查账号索引",
+        "检查选中账号状态",
         "设为默认账号",
         "删除账号",
         "本地账号自检",
@@ -536,6 +537,66 @@ def test_main_window_delete_warns_when_index_still_contains_uid(qtbot: QtBot) ->
     assert "10001" not in message
     assert "token" not in message.lower()
     assert "cookie" not in message.lower()
+
+
+def test_main_window_checks_selected_account_status_without_echoing_identifiers(
+    qtbot: QtBot,
+) -> None:
+    store = FakeAccountStore()
+    store.save_tencent_session(
+        _tencent_session("local-qq-user", "SECRET_QQ_TOKEN", TencentLoginProvider.QQ),
+        authorized=True,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window._refresh_account_table_row("local-qq-user")
+
+    window._check_selected_account_status()
+
+    message = window.statusBar().currentMessage()
+    assert "选中账号状态已检查" in message
+    assert "登录态已保存" in message
+    assert "已授权" in message
+    assert "索引已验证" in message
+    assert "local-qq-user" not in message
+    assert "SECRET_QQ_TOKEN" not in message
+    assert "token" not in message.lower()
+    assert "cookie" not in message.lower()
+    assert "ticket" not in message.lower()
+    assert "payload" not in message.lower()
+
+
+def test_main_window_check_selected_account_status_warns_when_index_missing(
+    qtbot: QtBot,
+) -> None:
+    class MissingIndexStore(FakeAccountStore):
+        def list_tencent_sessions(
+            self,
+            provider: TencentLoginProvider = TencentLoginProvider.QQ,
+        ) -> list[TencentAccountIndexEntry]:
+            assert provider is TencentLoginProvider.QQ
+            return []
+
+    store = MissingIndexStore()
+    store.save_tencent_session(
+        _tencent_session("local-qq-user", "SECRET_QQ_TOKEN", TencentLoginProvider.QQ),
+        authorized=True,
+    )
+    window = MainWindow(account_store=store)
+    qtbot.addWidget(window)
+    window._refresh_account_table_row("local-qq-user")
+
+    window._check_selected_account_status()
+
+    message = window.statusBar().currentMessage()
+    assert "选中账号状态异常" in message
+    assert "索引缺失" in message
+    assert "local-qq-user" not in message
+    assert "SECRET_QQ_TOKEN" not in message
+    assert "token" not in message.lower()
+    assert "cookie" not in message.lower()
+    assert "ticket" not in message.lower()
+    assert "payload" not in message.lower()
 
 
 def test_main_window_add_account_opens_qr_dialog_and_refreshes_account_table(

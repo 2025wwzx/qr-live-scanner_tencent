@@ -317,6 +317,7 @@ class MainWindow(QMainWindow):
         account_menu.addAction("导入已保存账号", self._show_import_account_dialog)
         account_menu.addAction("导入全部已保存账号", self._import_saved_tencent_accounts)
         account_menu.addAction("检查账号索引", self._repair_tencent_account_index)
+        account_menu.addAction("检查选中账号状态", self._check_selected_account_status)
         account_menu.addAction("设为默认账号", self._set_selected_account_as_default)
         account_menu.addAction("删除账号", self._clear_selected_account)
         account_menu.addAction("本地账号自检", self._run_tencent_account_smoke_dialog)
@@ -628,6 +629,35 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(
             _tencent_index_repair_status_message("账号索引已检查", repair_result)
+        )
+
+    def _check_selected_account_status(self) -> None:
+        uid = self._selected_table_uid()
+        if not uid:
+            self.statusBar().showMessage("请先在账号列表中选中一个账号")
+            return
+        provider = self._selected_provider()
+        try:
+            session = self.account_store.get_tencent_session(uid, provider)
+            authorized = self.account_store.is_tencent_authorized(uid, provider)
+            indexed = _tencent_account_index_contains(
+                self.account_store,
+                uid,
+                provider,
+                authorized=authorized,
+            )
+        except AccountStoreError:
+            self.statusBar().showMessage(ACCOUNT_STORE_ERROR_HINT)
+            return
+        if session is None or session.provider is not provider:
+            self.statusBar().showMessage("选中账号状态异常：登录态缺失")
+            return
+        if not indexed:
+            self.statusBar().showMessage("选中账号状态异常：索引缺失")
+            return
+        auth_text = "已授权" if authorized else "未授权"
+        self.statusBar().showMessage(
+            f"选中账号状态已检查：登录态已保存，{auth_text}，索引已验证"
         )
 
     def _run_tencent_account_smoke_dialog(self) -> None:

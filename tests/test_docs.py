@@ -36,6 +36,8 @@ def test_readme_documents_gui_mock_account_confirmation() -> None:
     assert "`tencent-status` 查询后回填本地账号索引" in readme
     assert "`tencent-status` 在确认账号已保存且已授权后会验证账号索引" in readme
     assert "不会显示或导出 Cookie、token、ticket、二维码 payload" in readme
+    assert "检查选中账号状态" in readme
+    assert "验证登录态、授权标记和本地索引" in readme
     assert "Mock confirm" in readme
     assert "Local mock UID" in readme
     assert "QQ/微信真实 HTTP 仍然禁用" in readme
